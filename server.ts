@@ -70,7 +70,10 @@ let firestoreDb: Firestore | null = null;
 let storageBucket: ReturnType<ReturnType<typeof getStorage>['bucket']> | null = null;
 let isFirebaseConfigured = false;
 
-const serviceAccountPath = path.join(process.cwd(), 'service-account.json');
+// Overridable so a deployment can mount the credentials file somewhere other than the app
+// directory itself — mounting a Cloud Run secret volume AT a path inside /app would otherwise
+// shadow the rest of the app's own files (dist/, node_modules/, etc.) living in that directory.
+const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH || path.join(process.cwd(), 'service-account.json');
 if (fs.existsSync(serviceAccountPath)) {
   try {
     const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf-8'));
