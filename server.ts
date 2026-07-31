@@ -74,7 +74,10 @@ const serviceAccountPath = path.join(process.cwd(), 'service-account.json');
 if (fs.existsSync(serviceAccountPath)) {
   try {
     const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf-8'));
-    const bucketName = process.env.FIREBASE_STORAGE_BUCKET || `${serviceAccount.project_id}.appspot.com`;
+    // Firebase projects created after ~Oct 2024 default to the `.firebasestorage.app` bucket
+    // naming convention (older projects use `.appspot.com`) — override via FIREBASE_STORAGE_BUCKET
+    // if this guess is wrong for your project.
+    const bucketName = process.env.FIREBASE_STORAGE_BUCKET || `${serviceAccount.project_id}.firebasestorage.app`;
     const firebaseApp = initializeApp({
       credential: cert(serviceAccount),
       storageBucket: bucketName
