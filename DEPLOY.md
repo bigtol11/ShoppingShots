@@ -21,12 +21,21 @@ gcloud run deploy shoppingshots \
 
 `--source .`를 쓰면 gcloud가 Cloud Build로 `Dockerfile`을 자동으로 빌드해서 올려줍니다. `Dockerfile`을 직접 만들 필요가 없습니다.
 
-## 3. ⚠️ 반드시 알아야 할 제약: 로컬 디스크 기반 저장소
+## 3. 저장소: Firestore + Cloud Storage (권장) vs 로컬 디스크
 
-현재 계정/로그인 정보, 완성된 프로젝트 목록, 업로드한 이미지/음성 파일은 **컨테이너 내부 로컬 디스크**(`server_data/`, `public/uploads/`, `public/exports/`)에 저장됩니다. Cloud Run은 기본적으로 컨테이너가 재시작/재배포될 때마다 로컬 디스크를 초기화합니다.
+서버 코드는 `service-account.json`이 프로젝트 루트에 있으면 **자동으로** 계정/프로젝트 데이터는 Firestore에, 업로드/렌더 결과물은 Cloud Storage에 저장합니다. 파일이 없으면 컨테이너 로컬 디스크(`server_data/`, `public/uploads/`, `public/exports/`)로 자동 전환됩니다.
 
-- `--min-instances=1 --max-instances=1`로 배포하면 **평소에는** 인스턴스가 하나만 유지되어 문제없이 동작하지만, **재배포하거나 Cloud Run이 인스턴스를 교체하면** 가입한 계정/저장된 프로젝트/업로드 파일이 전부 사라집니다. 지금처럼 "나 + 지인 몇 명" 규모에서 임시로 쓰기엔 괜찮지만, **진짜 서비스로 열 때는 반드시 아래로 바꿔야 합니다.**
-- 정식 전환 시 필요한 것: 계정/프로젝트 데이터 → Firestore나 Cloud SQL, 업로드/렌더 결과물 → Cloud Storage 버킷. (참고: 이미 사용 중이신 ShortDramaProject/Shorts Engine이 Firestore+Firebase Auth를 쓰고 있으니, 그때 가면 같은 패턴을 재사용하시면 됩니다. **단, 이건 별개 프로젝트이니 지금 당장 손댈 필요는 없습니다.**)
+- **Firestore/Cloud Storage 없이 배포하면** (`service-account.json` 미포함) — 로컬 디스크에 저장되므로 Cloud Run이 인스턴스를 재시작/교체할 때마다 가입 계정/프로젝트/업로드 파일이 전부 사라집니다. `--min-instances=1 --max-instances=1`로 임시 방편은 가능하지만 재배포 시엔 여전히 날아갑니다.
+- **Firestore/Cloud Storage를 붙이면** — 이 제약이 사라집니다. 별도의 새 Firebase 프로젝트(예: `shoppingshots-prod`, **ShortDramaProject의 Firebase 프로젝트와는 완전히 별개**)에서 Firestore + Storage를 활성화하고 서비스 계정 키를 발급받아야 합니다.
+
+### 로컬 개발 시 연결하기
+1. Firebase 콘솔 → 새 프로젝트 생성 → Firestore Database 활성화 → Storage 활성화
+2. 프로젝트 설정 → 서비스 계정 → "새 비공개 키 생성" → JSON 다운로드
+3. 다운로드한 파일을 `E:\ShoppingShots\service-account.json`으로 저장 (`.gitignore`/`.dockerignore`에 이미 등록되어 있어 커밋되지 않습니다)
+4. `npm run dev` 실행 시 로그에 `[Firebase Admin] Initialized — Firestore + Cloud Storage ENABLED` 가 뜨면 연결 성공
+
+### Cloud Run 배포 시 연결하기
+컨테이너 이미지에는 `service-account.json`을 절대 포함시키지 않습니다 (이미 `.dockerignore`에서 제외됨). 대신 Cloud Run의 서비스 계정 자체에 Firestore/Storage 권한을 부여하고, 별도 인증 파일 없이 [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials)로 인증하는 방식을 권장합니다 — 이 부분은 실제 배포 시점에 같이 봐드리겠습니다.
 
 ## 4. JWT_SECRET / SIGNUP_INVITE_CODE / ADMIN_SECRET 값 정하기
 

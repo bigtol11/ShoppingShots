@@ -10,6 +10,9 @@ import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import cookieParser from 'cookie-parser';
+import { initializeApp, cert } from 'firebase-admin/app';
+import { getFirestore, Firestore } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 
 dotenv.config();
 
@@ -39,9 +42,11 @@ const PORT = Number(process.env.PORT) || 3000;
 app.use(express.json({ limit: '20mb' }));
 app.use(cookieParser());
 
-// ---- Lightweight invite-only auth ----
-// Single JSON-file user store; fine for a handful of known users. Swap for a real database
-// (and add email verification / password reset / OAuth) before opening this up publicly.
+// ---- Firebase Admin (Firestore + Cloud Storage), with local-file fallback ----
+// If service-account.json is present, user accounts/projects live in Firestore and
+// uploads/renders live in Cloud Storage — this is what actually survives a Cloud Run
+// redeploy/instance-replace. Without it, everything falls back to local JSON files/disk,
+// which is fine for local dev but is wiped on every container restart (see DEPLOY.md).
 const serverDataDir = path.join(process.cwd(), 'server_data');
 if (!fs.existsSync(serverDataDir)) {
   try {
@@ -59,6 +64,30 @@ if (!fs.existsSync(projectsDir)) {
   } catch (err) {
     console.warn('[Directory creation warning]', err);
   }
+}
+
+let firestoreDb: Firestore | null = null;
+let storageBucket: ReturnType<ReturnType<typeof getStorage>['bucket']> | null = null;
+let isFirebaseConfigured = false;
+
+const serviceAccountPath = path.join(process.cwd(), 'service-account.json');
+if (fs.existsSync(serviceAccountPath)) {
+  try {
+    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf-8'));
+    const bucketName = process.env.FIREBASE_STORAGE_BUCKET || `${serviceAccount.project_id}.appspot.com`;
+    const firebaseApp = initializeApp({
+      credential: cert(serviceAccount),
+      storageBucket: bucketName
+    });
+    firestoreDb = getFirestore(firebaseApp);
+    storageBucket = getStorage(firebaseApp).bucket();
+    isFirebaseConfigured = true;
+    console.log(`[Firebase Admin] Initialized — Firestore + Cloud Storage ENABLED (project: ${serviceAccount.project_id}, bucket: ${bucketName}).`);
+  } catch (err: any) {
+    console.warn('[Firebase Admin] Failed to initialize from service-account.json, falling back to local file storage:', err.message);
+  }
+} else {
+  console.log('[Firebase Admin] service-account.json not found — using local file storage (see DEPLOY.md before deploying for real).');
 }
 
 function getJwtSecret(): string {
@@ -83,7 +112,7 @@ interface StoredUser {
   createdAt: string;
 }
 
-function readUsers(): StoredUser[] {
+function readUsersLocal(): StoredUser[] {
   try {
     if (!fs.existsSync(usersFilePath)) return [];
     return JSON.parse(fs.readFileSync(usersFilePath, 'utf-8'));
@@ -91,8 +120,38 @@ function readUsers(): StoredUser[] {
     return [];
   }
 }
-function writeUsers(users: StoredUser[]) {
+function writeUsersLocal(users: StoredUser[]) {
   fs.writeFileSync(usersFilePath, JSON.stringify(users, null, 2));
+}
+
+async function findUserByEmail(email: string): Promise<StoredUser | null> {
+  const emailLower = email.toLowerCase();
+  if (isFirebaseConfigured && firestoreDb) {
+    const snap = await firestoreDb.collection('users').where('emailLower', '==', emailLower).limit(1).get();
+    if (snap.empty) return null;
+    const doc = snap.docs[0];
+    const data = doc.data();
+    return { id: doc.id, email: data.email, passwordHash: data.passwordHash, createdAt: data.createdAt };
+  }
+  return readUsersLocal().find((u) => u.email.toLowerCase() === emailLower) || null;
+}
+
+async function createUser(email: string, passwordHash: string): Promise<StoredUser> {
+  const id = `u_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const newUser: StoredUser = { id, email, passwordHash, createdAt: new Date().toISOString() };
+  if (isFirebaseConfigured && firestoreDb) {
+    await firestoreDb.collection('users').doc(id).set({
+      email,
+      emailLower: email.toLowerCase(),
+      passwordHash,
+      createdAt: newUser.createdAt
+    });
+    return newUser;
+  }
+  const users = readUsersLocal();
+  users.push(newUser);
+  writeUsersLocal(users);
+  return newUser;
 }
 
 app.post('/api/auth/register', async (req, res) => {
@@ -110,19 +169,12 @@ app.post('/api/auth/register', async (req, res) => {
     if (!password || typeof password !== 'string' || password.length < 8) {
       return res.status(400).json({ status: 'error', message: '비밀번호는 8자 이상이어야 합니다.' });
     }
-    const users = readUsers();
-    if (users.some((u) => u.email.toLowerCase() === String(email).toLowerCase())) {
+    const existing = await findUserByEmail(email);
+    if (existing) {
       return res.status(409).json({ status: 'error', message: '이미 가입된 이메일입니다.' });
     }
     const passwordHash = await bcrypt.hash(password, 10);
-    const newUser: StoredUser = {
-      id: `u_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      email,
-      passwordHash,
-      createdAt: new Date().toISOString()
-    };
-    users.push(newUser);
-    writeUsers(users);
+    const newUser = await createUser(email, passwordHash);
 
     const token = jwt.sign({ uid: newUser.id, email: newUser.email }, JWT_SECRET, { expiresIn: '30d' });
     res.cookie(AUTH_COOKIE, token, { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
@@ -135,8 +187,7 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
-    const users = readUsers();
-    const user = users.find((u) => u.email.toLowerCase() === String(email || '').toLowerCase());
+    const user = await findUserByEmail(String(email || ''));
     if (!user) {
       return res.status(401).json({ status: 'error', message: '이메일 또는 비밀번호가 올바르지 않습니다.' });
     }
@@ -194,43 +245,71 @@ app.use('/api', (req, res, next) => {
 function projectsFilePathForUser(userId: string) {
   return path.join(projectsDir, `${userId}.json`);
 }
+function readUserProjectsLocal(userId: string): any[] {
+  const fp = projectsFilePathForUser(userId);
+  return fs.existsSync(fp) ? JSON.parse(fs.readFileSync(fp, 'utf-8')) : [];
+}
+function writeUserProjectsLocal(userId: string, projects: any[]) {
+  fs.writeFileSync(projectsFilePathForUser(userId), JSON.stringify(projects, null, 2));
+}
 
-app.get('/api/projects', (req, res) => {
+async function getUserProjects(userId: string): Promise<any[]> {
+  if (isFirebaseConfigured && firestoreDb) {
+    const snap = await firestoreDb.collection('users').doc(userId).collection('projects').orderBy('createdAt', 'desc').get();
+    return snap.docs.map((d) => d.data());
+  }
+  return readUserProjectsLocal(userId);
+}
+
+async function saveUserProject(userId: string, project: any): Promise<any[]> {
+  if (isFirebaseConfigured && firestoreDb) {
+    await firestoreDb.collection('users').doc(userId).collection('projects').doc(project.id).set(project);
+    return getUserProjects(userId);
+  }
+  const existing = readUserProjectsLocal(userId).filter((p: any) => p.id !== project.id);
+  const updated = [project, ...existing];
+  writeUserProjectsLocal(userId, updated);
+  return updated;
+}
+
+async function deleteUserProject(userId: string, projectId: string): Promise<any[]> {
+  if (isFirebaseConfigured && firestoreDb) {
+    await firestoreDb.collection('users').doc(userId).collection('projects').doc(projectId).delete();
+    return getUserProjects(userId);
+  }
+  const updated = readUserProjectsLocal(userId).filter((p: any) => p.id !== projectId);
+  writeUserProjectsLocal(userId, updated);
+  return updated;
+}
+
+app.get('/api/projects', async (req, res) => {
   const userId = (req as any).userId;
   try {
-    const fp = projectsFilePathForUser(userId);
-    const projects = fs.existsSync(fp) ? JSON.parse(fs.readFileSync(fp, 'utf-8')) : [];
+    const projects = await getUserProjects(userId);
     res.json({ status: 'success', projects });
   } catch (err: any) {
     res.status(500).json({ status: 'error', message: '프로젝트 목록을 불러오지 못했습니다.' });
   }
 });
 
-app.post('/api/projects', (req, res) => {
+app.post('/api/projects', async (req, res) => {
   const userId = (req as any).userId;
   try {
     const project = req.body;
     if (!project?.id) {
       return res.status(400).json({ status: 'error', message: '유효하지 않은 프로젝트 데이터입니다.' });
     }
-    const fp = projectsFilePathForUser(userId);
-    const existing = fs.existsSync(fp) ? JSON.parse(fs.readFileSync(fp, 'utf-8')) : [];
-    const filtered = existing.filter((p: any) => p.id !== project.id);
-    const updated = [project, ...filtered];
-    fs.writeFileSync(fp, JSON.stringify(updated, null, 2));
+    const updated = await saveUserProject(userId, project);
     res.json({ status: 'success', projects: updated });
   } catch (err: any) {
     res.status(500).json({ status: 'error', message: '프로젝트 저장에 실패했습니다.' });
   }
 });
 
-app.delete('/api/projects/:id', (req, res) => {
+app.delete('/api/projects/:id', async (req, res) => {
   const userId = (req as any).userId;
   try {
-    const fp = projectsFilePathForUser(userId);
-    const existing = fs.existsSync(fp) ? JSON.parse(fs.readFileSync(fp, 'utf-8')) : [];
-    const updated = existing.filter((p: any) => p.id !== req.params.id);
-    fs.writeFileSync(fp, JSON.stringify(updated, null, 2));
+    const updated = await deleteUserProject(userId, req.params.id);
     res.json({ status: 'success', projects: updated });
   } catch (err: any) {
     res.status(500).json({ status: 'error', message: '프로젝트 삭제에 실패했습니다.' });
@@ -284,7 +363,7 @@ function guessExtFromMime(mime?: string): string {
 
 // Client-side file upload (images/video/audio the user attaches) -> persisted server URL,
 // so later server-side steps (e.g. FFmpeg rendering) can actually read the file.
-app.post('/api/upload-media', (req, res) => {
+app.post('/api/upload-media', async (req, res) => {
   try {
     const { fileBase64, fileName = 'upload.bin', mimeType = 'application/octet-stream' } = req.body || {};
     if (!fileBase64 || typeof fileBase64 !== 'string') {
@@ -293,8 +372,16 @@ app.post('/api/upload-media', (req, res) => {
     const base64Data = fileBase64.includes(',') ? fileBase64.split(',')[1] : fileBase64;
     const ext = (path.extname(fileName) || guessExtFromMime(mimeType) || '.bin').replace(/[^a-zA-Z0-9.]/g, '') || '.bin';
     const outFilename = `up_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    if (isFirebaseConfigured && storageBucket) {
+      const destPath = `uploads/${outFilename}`;
+      await storageBucket.file(destPath).save(buffer, { metadata: { contentType: mimeType }, public: true });
+      return res.json({ status: 'success', url: `https://storage.googleapis.com/${storageBucket.name}/${destPath}` });
+    }
+
     const outPath = path.join(uploadsDir, outFilename);
-    fs.writeFileSync(outPath, Buffer.from(base64Data, 'base64'));
+    fs.writeFileSync(outPath, buffer);
     res.json({ status: 'success', url: `/uploads/${outFilename}` });
   } catch (err: any) {
     res.status(500).json({ status: 'error', message: '파일 업로드 처리 실패: ' + (err?.message || '') });
@@ -2090,6 +2177,20 @@ app.post('/api/render-video', (req, res) => {
         return;
       }
 
+      // FFmpeg can only write to local disk, so on Cloud Storage-backed deployments the
+      // finished file is uploaded here — this is what actually survives a redeploy, since
+      // /exports/* on local disk is wiped whenever the container instance is replaced.
+      let finalVideoUrl = `/exports/${outputFilename}`;
+      if (isFirebaseConfigured && storageBucket) {
+        try {
+          const destPath = `exports/${outputFilename}`;
+          await storageBucket.upload(outputPath, { destination: destPath, metadata: { contentType: 'video/mp4' }, public: true });
+          finalVideoUrl = `https://storage.googleapis.com/${storageBucket.name}/${destPath}`;
+        } catch (uploadErr: any) {
+          console.warn('[Cloud Storage Upload Warning] Falling back to local /exports URL:', uploadErr.message);
+        }
+      }
+
       renderJobs.set(jobId, {
         id: jobId,
         status: 'completed',
@@ -2099,7 +2200,7 @@ app.post('/api/render-video', (req, res) => {
           : `4/4 🎉 ${resolution} ${fps}fps MP4 씬 합성 완료!`,
         resolution,
         fps,
-        videoUrl: `/exports/${outputFilename}`,
+        videoUrl: finalVideoUrl,
         usedFallbackMedia,
         createdAt: newJob.createdAt
       });

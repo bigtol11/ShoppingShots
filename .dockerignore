@@ -8,3 +8,4 @@ public/exports
 .env.local
 *.log
 .git
+service-account.json
