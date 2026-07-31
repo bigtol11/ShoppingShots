@@ -1,0 +1,6 @@
+{
+  "name": "SceneFactory Shopping Shorts Studio",
+  "description": "AI-powered shopping shorts video generation and automation studio with fact-checking and 9:16 timeline editor",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

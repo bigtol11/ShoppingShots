@@ -1,0 +1,10 @@
+node_modules
+dist
+build
+server_data
+public/uploads
+public/exports
+.env
+.env.local
+*.log
+.git
