@@ -4,6 +4,18 @@ This file exists so that any Claude Code session — on any PC — can pick up t
 project with full context even if the chat history itself doesn't carry over.
 Read this first before making changes.
 
+## ⚠️ Versioning convention — always bump on every deploy
+
+`package.json`'s `"version"` field is the single source of truth for the version
+badge shown in the UI (Header + Sidebar, via `__APP_VERSION__` injected by
+`vite.config.ts`) and in the server startup log. **Before every Cloud Run
+deploy, bump the patch number** (1.0.1 → 1.0.2 → 1.0.3 → ...) and commit that
+change as part of the same batch. This is an explicit standing instruction
+from the user (2026-08-01) — they use the visible version number to confirm
+which deployed build they're looking at, matching the pattern already used in
+their other project (ShortDramaProject shows "Shorts Engine v1.5.2" in its
+header). Do not skip this even for tiny changes.
+
 ## ⚠️ Project isolation — read this first
 
 The user runs **two separate, unrelated projects** side by side:
