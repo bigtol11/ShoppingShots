@@ -55,7 +55,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             쇼핑쇼츠 자동화 파이프라인
           </span>
           <span className="text-[10px] bg-purple-950 text-purple-300 border border-purple-800/60 px-1.5 py-0.5 rounded font-mono">
-            v4.0
+            v{__APP_VERSION__}
           </span>
         </div>
 

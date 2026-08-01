@@ -219,7 +219,7 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
               {currentScene?.scene_id || 'S01'} ({currentTime.toFixed(1)}s / {totalDuration.toFixed(1)}s)
             </span>
             <span className="bg-purple-600/80 px-2 py-0.5 rounded-full font-bold">
-              Lucy Studio
+              ShoppingShots
             </span>
           </div>
 

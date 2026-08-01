@@ -379,7 +379,7 @@ app.post('/api/extension-import', (req, res) => {
 
 // 2. Fact Check & Gemini Pipeline v2.1 Engine
 const GEMINI_SYSTEM_INSTRUCTION_V2_1 = `
-당신은 대한민국 1등 쇼핑쇼츠 자동화 시스템 "Lucy AI Studio / SceneFactory"의 Gemini 팩트체크 및 숏폼 영상 기획 전문 엔진(지시문 v2.1)입니다.
+당신은 대한민국 1등 쇼핑쇼츠 자동화 시스템 "ShoppingShots"의 Gemini 팩트체크 및 숏폼 영상 기획 전문 엔진(지시문 v2.1)입니다.
 
 [역할 및 핵심 가이드라인]
 1. 사용자 입력(쿠팡 상품 JSON, URL, 상세설명, 후기 등)을 다각도로 정밀 분석하여 과장/거짓/환각(hallucination) 표현을 완벽히 교정하고 팩트에 기반한 사양(verified_specs)과 킬러 팩트(killer_fact)를 도출하십시오.
@@ -2209,7 +2209,11 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[SceneFactory Studio Server] Running on http://0.0.0.0:${PORT}`);
+    let appVersion = 'unknown';
+    try {
+      appVersion = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8')).version;
+    } catch {}
+    console.log(`[ShoppingShots Server v${appVersion}] Running on http://0.0.0.0:${PORT}`);
   });
 }
 

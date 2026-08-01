@@ -90,7 +90,7 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
             <span>탭 1: 🔥 트렌드 주제 & 벤치마킹 분석 엔진</span>
           </div>
           <h2 className="text-2xl font-black text-white tracking-tight">
-            유튜브 / 틱톡 / 도우인 바이럴 쇼핑 트렌드 실시간 탐색
+            바이럴 쇼핑 트렌드 실시간 탐색
           </h2>
           <p className="text-sm text-slate-300 leading-relaxed">
             카테고리와 키워드를 입력하면 조회수 100만 회 이상 폭발한 쇼핑쇼츠 주제, 후킹 패턴, 벤치마킹 소스를 자동 수집합니다.

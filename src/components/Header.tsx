@@ -34,13 +34,16 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, project
           </div>
           <div className="hidden xs:flex items-center space-x-1.5 min-w-0">
             <span className="font-bold text-base sm:text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-purple-200 bg-clip-text text-transparent truncate">
-              Lucy AI Studio
+              ShoppingShots
+            </span>
+            <span className="text-[10px] font-mono font-bold text-purple-300 bg-purple-950/80 border border-purple-800/60 px-1.5 py-0.5 rounded shrink-0">
+              v{__APP_VERSION__}
             </span>
             <Star className="hidden sm:block w-4 h-4 fill-amber-400 text-amber-400 shrink-0" />
           </div>
         </div>
 
-        {/* Navigation Bar matching Lucy AI Studio design */}
+        {/* Navigation Bar */}
         <nav className="hidden md:flex items-center space-x-2 text-xs font-medium text-slate-300">
           <button
             onClick={() => setActiveTab('projects')}
