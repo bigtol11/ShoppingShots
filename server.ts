@@ -596,27 +596,61 @@ ${productJson ? JSON.stringify(productJson) : ''}
 });
 
 // 3. Script Generator API (3 Candidates with different Hook Styles)
+// Real per-style voice/structure guides — each selected style genuinely shapes the writing,
+// instead of the style picker being decorative. Keep in sync (in spirit) with the style list
+// in src/components/ScriptGeneratorView.tsx.
+const SCRIPT_STYLE_GUIDES: Record<string, string> = {
+  '정보전달 쇼핑쇼츠': '객관적 정보 전달이 핵심. 과장된 감탄사나 체험담 없이, 스펙·기능·사용법을 명확하고 신뢰감 있게 설명. 후킹은 "이런 기능 있는 거 알고 계셨나요?" 류의 정보성 질문이나 몰랐던 사실 제시. 숫자·수치·비교 데이터를 적극 활용.',
+  '인스타 생활설득형': '내돈내산 후기 톤. 친구에게 추천하듯 편안한 구어체로, 일상 속 불편함에 공감하며 시작해서 이 상품으로 해결됐다는 흐름.',
+  '썰쇼츠형': '질문을 던지고 반전을 주는 스토리텔링 구조("이거 실화냐", "말도 안 되는 일이 있었음"). 궁금증을 유발한 뒤 상품으로 해결.',
+  '글로벌 인사이트형': '해외 사례나 트렌드를 언급하며 비즈니스적/트렌디한 관점에서 설명. "해외에서는 이미 난리 난..." 류의 도입.',
+  '인테리어 전문가형': '공간 배치·동선 관점에서 설명하는 전문가 톤. 이 상품이 있고 없고에 따른 공간의 변화를 구체적으로 묘사.',
+  '공간 기운 설계형': '현대적 풍수/공간 에너지 관점의 설득. 안정감, 좋은 기운, 복이 들어오는 이미지를 강조하되 미신적으로 과하지 않게.',
+  '살림,생활 직설형': '훈수 두는 듯한 직설적이고 단호한 어투. 가성비와 실용성을 팩트 위주로 강하게 밀어붙임.',
+  '기획 천재 발견형': '"이거 만든 사람 천재 아니냐" 류의 감탄 톤. 상품 기획 의도/디테일에 감탄하며 소개.',
+  '심리자극형': '우월감과 보상 심리를 자극. "이거 쓰기 전과 후의 나는 다르다" 류의 자기 변화 서사.'
+};
+
 app.post('/api/generate-scripts', async (req, res) => {
   try {
-    const { productFacts, targetDuration = 18, selectedStyle = '인스타 생활설득형' } = req.body;
+    const { productFacts, targetDuration = 18, selectedStyle = '정보전달 쇼핑쇼츠', additionalInstructions = '' } = req.body;
     const ai = getGeminiClient(getUserGeminiKey(req));
+    const styleGuide = SCRIPT_STYLE_GUIDES[selectedStyle] || SCRIPT_STYLE_GUIDES['정보전달 쇼핑쇼츠'];
 
     const prompt = `
-당신은 쇼핑쇼츠 전문 대본가입니다. 아래 상품 정보를 토대로 유튜브 쇼츠/틱톡에 적합한 팩트 기반 숏폼 대본 3가지를 생성하세요.
+당신은 대한민국 최상위 1% 쇼핑쇼츠(제휴마케팅 숏폼) 전문 대본가입니다. 이 앱은 오직 "조회수가 최대한 많이 나오는 쇼핑쇼츠"를 만들기 위한 것입니다 — 아래 대본은 실제로 유튜브 쇼츠/틱톡 알고리즘에 올라타서 최대한 많은 사람이 끝까지 보게 만드는 것이 최우선 목표입니다.
 
 [상품명]: ${productFacts?.product_name || '상품'}
 [핵심 팩트]: ${JSON.stringify(productFacts?.verified_facts || [])}
 [사용 상황]: ${JSON.stringify(productFacts?.use_cases || [])}
-[목표 영상 길]: ${targetDuration}초 (한국어 읽기 속도 기준 약 ${Math.round(targetDuration * 14)}글자)
+[목표 영상 길이]: ${targetDuration}초 (한국어 읽기 속도 기준 약 ${Math.round(targetDuration * 14)}글자)
 
-[대본 작성 제약 조건]:
-1. 구어체 말투(~음/~함/~했음 또는 ~죠?, ~해보세요)를 엄격히 지키세요.
-2. 팩트에 없는 가짜 스펙이나 거짓 체험담("내가 3년째 쓰고 있는데" 등) 금지.
-3. 대본 1: ${selectedStyle} (불편 공감 후킹)
-4. 대본 2: 썰쇼츠형 (질문-반전-스토리텔링)
-5. 대본 3: 살림/생활 직설형 (훈수형 후킹-가성비-생활 꿀팁)
+[선택된 대본 스타일]: "${selectedStyle}"
+[이 스타일의 정의 — 반드시 이 톤/구조를 따를 것]: ${styleGuide}
 
-JSON 형태로 각 대본의 id, title, style, target_duration_sec, hook_type, full_text, risk_notes, confidence_score를 응답하세요.
+[조회수 최대화 알고리즘 — 실제 플랫폼 데이터 기반, 모든 대본 공통 절대 원칙]:
+숏폼 알고리즘 순위 결정 요인의 40~50%는 "완주율/시청 지속시간"이며, 그 완주율은 전적으로 첫 3초에서 결정된다.
+첫 3초 이탈 방지에 실패하면 알고리즘이 영상을 아예 확산시키지 않는다. 참고 벤치마크: 3초 지점 잔존율 70%↔ 확산 가능성 큼, 15초 지점 60%, 30초 지점 50%.
+클릭률 최상위 영상의 63%가 정확히 3초 안에 후킹을 완료한다. 후킹 문장은 10~14단어(한국어 기준 약 20~35자) 내로 짧고 강력해야 한다.
+
+1. **첫 문장(3초, 약 20~35자)은 아래 6가지 검증된 후킹 공식 중 이 대본에 가장 잘 맞는 것을 반드시 하나 선택해 사용하라**:
+   - **통념 뒤집기(Contrarian Claim)**: 사람들이 당연하다고 믿는 것을 정면으로 반박 ("○○ 하면 안 됩니다", "다들 이렇게 알고 있는데 틀렸습니다")
+   - **실수 경고(Mistake Warning)**: 시청자가 이미 하고 있을 법한 실수를 지적 ("이거 모르고 쓰면 손해입니다")
+   - **리스트 예고(List Tease)**: 앞으로 나올 정보의 개수를 미리 제시해 완주를 유도 ("이거 3가지만 알면 끝")
+   - **문제-자극-해결(Problem-Agitate-Solve)**: 0~3초 공감되는 불편/문제 제시 → 3~10초 그 문제를 더 구체적으로 자극 → 10~20초 상품으로 해결 → 마지막 3~5초 CTA
+   - **비포/애프터(Before-After)**: 사용 전과 후의 극명한 대비를 첫 문장에서부터 예고
+   - **패턴 인터럽트(Pattern Interrupt)**: 예상 밖의 발언이나 상황으로 스크롤을 멈추게 하는 시각적/청각적 충격
+2. 도입부에서 "이 영상을 끝까지 봐야 하는 이유"(궁금증 미해소, 손해 회피 심리 등)를 명확히 심어라.
+3. 문장은 짧고 리듬감 있게 — 한 문장에 하나의 정보만. 지나치게 다듬어진 광고 카피보다, 실제 사람이 말하듯 약간 날것의 진솔한 톤이 전환율이 더 높다.
+4. 마지막은 명확한 CTA(구매 유도, 저장/공유 유도, 댓글 유도 중 하나)로 마무리.
+5. 구어체 말투(~음/~함/~했음 또는 ~죠?, ~해보세요)를 엄격히 지켜라. 문어체/뉴스체 금지.
+6. 팩트에 없는 가짜 스펙이나 거짓 체험담("내가 3년째 쓰고 있는데" 등)은 절대 금지 — 위에 주어진 핵심 팩트 범위 내에서만 작성.
+${additionalInstructions ? `7. 추가 지시사항(반드시 반영): ${additionalInstructions}` : ''}
+
+[출력 요구사항]:
+"${selectedStyle}" 스타일을 따르되, 위 6가지 후킹 공식 중 서로 다른 3개를 각각 적용한 대본 3개(변형 A/B/C)를 생성하라. 3개 모두 같은 스타일이어야 하며 (다른 스타일로 바꾸지 말 것), 어떤 후킹 공식을 썼는지 hook_type 필드에 명시하라 (예: "통념 뒤집기", "문제-자극-해결" 등).
+
+JSON 형태로 각 대본의 id, title, style(항상 "${selectedStyle}"), target_duration_sec, hook_type, full_text, risk_notes, confidence_score를 응답하세요.
 `;
 
     const response = await ai.models.generateContent({
@@ -653,13 +687,13 @@ JSON 형태로 각 대본의 id, title, style, target_duration_sec, hook_type, f
       data: [
         {
           id: 'script-fallback-1',
-          title: '인스타 생활설득형',
-          style: '인스타 생활설득형',
+          title: req.body.selectedStyle || '정보전달 쇼핑쇼츠',
+          style: req.body.selectedStyle || '정보전달 쇼핑쇼츠',
           target_duration_sec: 18,
-          hook_type: '불편 공감 후킹',
-          full_text: `${req.body.productFacts?.product_name || '이 상품'}, 평소 쓰면서 답답하셨죠? 세제 하나만 바꿔도 삶의 질이 달라짐. 검증된 오렌지 오일 성분으로 기름때 깔끔 세정!`,
-          risk_notes: ['환각 필터 통과'],
-          confidence_score: 0.95
+          hook_type: '생성 실패 - 기본 대본',
+          full_text: `${req.body.productFacts?.product_name || '이 상품'}, 이거 아직도 모르고 계셨다면 손해입니다. 지금 바로 확인해 보세요.`,
+          risk_notes: ['AI 생성 실패로 인한 기본 대본입니다. 다시 시도해 주세요.'],
+          confidence_score: 0.3
         }
       ]
     });

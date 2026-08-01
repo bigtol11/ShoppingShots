@@ -34,13 +34,18 @@ export const ScriptGeneratorView: React.FC<ScriptGeneratorViewProps> = ({
   onUpdateScripts,
   onNextStep
 }) => {
-  const [selectedStyle, setSelectedStyle] = useState('인스타 생활설득형');
+  const [selectedStyle, setSelectedStyle] = useState('정보전달 쇼핑쇼츠');
   const [hasDialogueFormat, setHasDialogueFormat] = useState(false);
   const [additionalInstructions, setAdditionalInstructions] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedScriptId, setCopiedScriptId] = useState<string | null>(null);
 
   const styleOptions = [
+    {
+      id: '정보전달 쇼핑쇼츠',
+      title: '정보전달 쇼핑쇼츠',
+      desc: '과장 없이 스펙·기능·사용법 중심의 신뢰형 (기본값)',
+    },
     {
       id: '인스타 생활설득형',
       title: '인스타 생활설득형',
