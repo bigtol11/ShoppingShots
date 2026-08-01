@@ -285,17 +285,24 @@ function isSafePublicHttpUrl(urlStr: string): boolean {
 }
 
 // Admin auth gate: fails closed unless ADMIN_SECRET is explicitly configured on the server
-const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
+// Admin gate reuses the already-established login session (requireUser runs first on every
+// /api/* route, see the global gate above) — no separate admin password to manage. Whoever's
+// logged-in Google email is in ADMIN_EMAILS gets admin endpoints; everyone else gets 403.
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
+  .split(',')
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
+
 function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
-  if (!ADMIN_SECRET) {
+  const email = ((req as any).userEmail || '').toLowerCase();
+  if (!ADMIN_EMAILS.length) {
     return res.status(503).json({
       status: 'error',
-      message: '관리자 기능이 비활성화되어 있습니다. 서버에 ADMIN_SECRET 환경변수를 설정해 주세요.'
+      message: '관리자 기능이 비활성화되어 있습니다. 서버에 ADMIN_EMAILS 환경변수를 설정해 주세요.'
     });
   }
-  const provided = req.headers['x-admin-secret'];
-  if (provided !== ADMIN_SECRET) {
-    return res.status(401).json({ status: 'error', message: '관리자 인증에 실패했습니다.' });
+  if (!email || !ADMIN_EMAILS.includes(email)) {
+    return res.status(403).json({ status: 'error', message: '관리자 권한이 없는 계정입니다.' });
   }
   next();
 }
@@ -333,9 +340,12 @@ app.post('/api/upload-media', async (req, res) => {
   }
 });
 
-// Helper to get Gemini client
-function getGeminiClient() {
-  const apiKey = process.env.GEMINI_API_KEY;
+// Helper to get Gemini client. Prefers the per-user BYOK key (sent via x-gemini-key header,
+// stored client-side per account) so each person's usage bills against their own key —
+// falls back to the server's shared admin key so a fresh account can try the app before
+// bothering to set up their own key.
+function getGeminiClient(userKey?: string) {
+  const apiKey = userKey || process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
     console.warn('[Gemini] GEMINI_API_KEY is not configured or using fallback key.');
   }
@@ -347,6 +357,11 @@ function getGeminiClient() {
       },
     },
   });
+}
+
+function getUserGeminiKey(req: express.Request): string | undefined {
+  const key = (req.headers['x-gemini-key'] as string) || req.body?.geminiKey;
+  return key && typeof key === 'string' && key.trim().length > 0 ? key.trim() : undefined;
 }
 
 // 1. Chrome Extension Receiver / Raw Product JSON Parser API
@@ -401,7 +416,7 @@ app.post('/api/gemini-pipeline-v2', async (req, res) => {
       });
     }
 
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(getUserGeminiKey(req));
 
     const userPrompt = `
 [분석 대상 상품 데이터]
@@ -483,7 +498,7 @@ app.post('/api/analyze-product', async (req, res) => {
       });
     }
 
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(getUserGeminiKey(req));
 
     const prompt = `
 제공된 상품 정보(상품명, JSON, 상세설명)를 분석하여 거짓/환각(hallucination)이 없는 팩트 데이터와 쇼핑쇼츠 제작 가이드를 작성하세요.
@@ -584,7 +599,7 @@ ${productJson ? JSON.stringify(productJson) : ''}
 app.post('/api/generate-scripts', async (req, res) => {
   try {
     const { productFacts, targetDuration = 18, selectedStyle = '인스타 생활설득형' } = req.body;
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(getUserGeminiKey(req));
 
     const prompt = `
 당신은 쇼핑쇼츠 전문 대본가입니다. 아래 상품 정보를 토대로 유튜브 쇼츠/틱톡에 적합한 팩트 기반 숏폼 대본 3가지를 생성하세요.
@@ -655,7 +670,7 @@ JSON 형태로 각 대본의 id, title, style, target_duration_sec, hook_type, f
 app.post('/api/generate-storyboard', async (req, res) => {
   try {
     const { scriptText, targetDuration = 18 } = req.body;
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(getUserGeminiKey(req));
 
     const prompt = `
 아래 쇼핑쇼츠 대본을 5~7개 장면(Scene)으로 분해하고 각 장면의 타임코드, 목적, 나레이션, 자막, 요구 비주얼, A/B/C 소스 등급 가이드를 JSON으로 생성하세요.
@@ -1004,6 +1019,18 @@ app.post('/api/settings/validate-key', async (req, res) => {
         provider: 'elevenlabs',
         message: '일레븐랩스(ElevenLabs) API 키 실시간 인증 성공! 보이스 카탈로그가 오디오 스튜디오에 연동되었습니다.'
       });
+    } else if (provider === 'gemini') {
+      try {
+        const testClient = new GoogleGenAI({ apiKey });
+        await testClient.models.generateContent({ model: 'gemini-3.6-flash', contents: 'ping' });
+        return res.json({
+          status: 'success',
+          provider: 'gemini',
+          message: 'Gemini API 키 실시간 인증 성공! 이제부터 본인 키로 사용량이 청구됩니다.'
+        });
+      } catch (geminiErr: any) {
+        return res.status(401).json({ status: 'error', message: `Gemini API 키 인증에 실패했습니다: ${geminiErr?.message || ''}` });
+      }
     }
   } catch (err: any) {
     return res.status(502).json({ status: 'error', message: '제공자 서버 연결에 실패했습니다: ' + (err?.message || '') });
@@ -1282,7 +1309,7 @@ app.post('/api/tts/preview', async (req, res) => {
     }
 
     // Default Gemini TTS
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(getUserGeminiKey(req));
     const response = await ai.models.generateContent({
       model: 'gemini-3.1-flash-tts-preview',
       contents: [{ parts: [{ text: `Korean narration sample: ${sampleText}` }] }],
@@ -1342,7 +1369,7 @@ app.post('/api/generate-tts', async (req, res) => {
       });
     }
 
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(getUserGeminiKey(req));
 
     // Use Gemini 3.1 Flash TTS model
     const response = await ai.models.generateContent({
@@ -1383,7 +1410,7 @@ app.post('/api/generate-tts', async (req, res) => {
 app.post('/api/generate-ai-video-prompt', async (req, res) => {
   try {
     const { visualDescription, productName } = req.body;
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(getUserGeminiKey(req));
 
     const prompt = `
 Create a precise, safe video prompt for AI video generators (Veo/Kling) for a Korean shopping shorts video.
@@ -1451,7 +1478,7 @@ const TODAY_KST = () => new Date().toLocaleDateString('ko-KR', { timeZone: 'Asia
 app.post('/api/trends/analyze', async (req, res) => {
   try {
     const { category = '주방/아이디어', keyword = '기름때 세제' } = req.body;
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(getUserGeminiKey(req));
 
     const prompt = `
 오늘은 ${TODAY_KST()}입니다 (대한민국 기준).
@@ -1503,7 +1530,7 @@ app.post('/api/trends/analyze', async (req, res) => {
 // products via real Google Search grounding, so the trend page isn't a blank form on first visit.
 app.post('/api/trends/auto-recommend', async (req, res) => {
   try {
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(getUserGeminiKey(req));
 
     const prompt = `
 오늘은 ${TODAY_KST()}입니다 (대한민국 기준).
@@ -1599,7 +1626,7 @@ app.post('/api/media/collect-douyin', async (req, res) => {
     }
 
     // Track A: AI Auto Search & Chinese Keyword Translation
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(getUserGeminiKey(req));
     const prompt = `
 한국어 상품 키워드 "${keyword || '주방용품'}"를 중국어 바이럴 검색어(예: 抖音 爆款 厨房)로 번역하고 3개의 도우인 메인 클립 가이드 목록을 리턴하세요.
 JSON:
@@ -1870,7 +1897,7 @@ app.post('/api/media/process-clip', async (req, res) => {
 app.post('/api/seo/generate-metadata', async (req, res) => {
   const { productName = '쿠팡 핫딜 아이템', scriptText = '', partnersUrl = '' } = req.body || {};
   try {
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(getUserGeminiKey(req));
 
     const prompt = `
 상품 "${productName}" 및 대본 내용으로 멀티플랫폼(유튜브 Shorts, 틱톡, 인스타그램 릴스, 네이버 클립) SEO 메타데이터를 작성하세요.

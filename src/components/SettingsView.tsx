@@ -17,14 +17,22 @@ import {
   Layers
 } from 'lucide-react';
 import { UserSettings, AdminStats } from '../types';
+import { apiFetch } from '../utils/apiClient';
 
 interface SettingsViewProps {
   onSettingsUpdated?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated }) => {
+  const [geminiKey, setGeminiKey] = useState('');
   const [typecastKey, setTypecastKey] = useState('');
   const [elevenlabsKey, setElevenlabsKey] = useState('');
+
+  const [geminiStatus, setGeminiStatus] = useState<{ loading: boolean; message: string | null; isSuccess: boolean }>({
+    loading: false,
+    message: null,
+    isSuccess: false
+  });
 
   const [typecastStatus, setTypecastStatus] = useState<{ loading: boolean; message: string | null; isSuccess: boolean }>({
     loading: false,
@@ -117,12 +125,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
 
   useEffect(() => {
     // Load stored keys
+    const savedGemini = localStorage.getItem('lucy_api_gemini_key') || '';
     const savedTypecast = localStorage.getItem('lucy_api_typecast_key') || '';
     const savedElevenLabs = localStorage.getItem('lucy_api_elevenlabs_key') || '';
 
+    setGeminiKey(savedGemini);
     setTypecastKey(savedTypecast);
     setElevenlabsKey(savedElevenLabs);
 
+    if (savedGemini) {
+      setGeminiStatus({ loading: false, message: '내 Gemini API 키가 연동되어 있습니다.', isSuccess: true });
+    }
     if (savedTypecast) {
       setTypecastStatus({ loading: false, message: 'Typecast API 키가 연동되어 있습니다.', isSuccess: true });
     }
@@ -140,9 +153,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
       .catch((err) => console.error(err));
   }, []);
 
-  const handleValidateKey = async (provider: 'typecast' | 'elevenlabs') => {
-    const keyToValidate = provider === 'typecast' ? typecastKey : elevenlabsKey;
-    const setStatus = provider === 'typecast' ? setTypecastStatus : setElevenlabsStatus;
+  const handleValidateKey = async (provider: 'gemini' | 'typecast' | 'elevenlabs') => {
+    const keyToValidate = provider === 'gemini' ? geminiKey : provider === 'typecast' ? typecastKey : elevenlabsKey;
+    const setStatus = provider === 'gemini' ? setGeminiStatus : provider === 'typecast' ? setTypecastStatus : setElevenlabsStatus;
+    const storageKey = provider === 'gemini' ? 'lucy_api_gemini_key' : provider === 'typecast' ? 'lucy_api_typecast_key' : 'lucy_api_elevenlabs_key';
 
     if (!keyToValidate || keyToValidate.trim().length < 8) {
       setStatus({
@@ -165,13 +179,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
 
       if (data?.status === 'success') {
         setStatus({ loading: false, message: data.message, isSuccess: true });
-
-        if (provider === 'typecast') {
-          localStorage.setItem('lucy_api_typecast_key', keyToValidate);
-        } else {
-          localStorage.setItem('lucy_api_elevenlabs_key', keyToValidate);
-        }
-
+        localStorage.setItem(storageKey, keyToValidate);
         if (onSettingsUpdated) onSettingsUpdated();
       } else {
         setStatus({ loading: false, message: data.message || '인증 실패', isSuccess: false });
@@ -179,6 +187,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
     } catch (err) {
       setStatus({ loading: false, message: '서버 연결 실패', isSuccess: false });
     }
+  };
+
+  const handleClearGeminiKey = () => {
+    localStorage.removeItem('lucy_api_gemini_key');
+    setGeminiKey('');
+    setGeminiStatus({ loading: false, message: '내 키를 제거했습니다. 이제 기본(관리자) 키를 사용합니다.', isSuccess: false });
   };
 
   return (
@@ -197,7 +211,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
               </span>
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">
-              개인 Typecast 및 ElevenLabs API 키를 등록하고, 잔여 렌더링 크레딧을 관리하세요.
+              개인 Gemini, Typecast, ElevenLabs API 키를 등록하고, 잔여 렌더링 크레딧을 관리하세요.
             </p>
           </div>
         </div>
@@ -238,11 +252,72 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
               </span>
             </div>
 
+            {/* Gemini API Key Card */}
+            <div className="bg-[#1a172e] border border-emerald-800/40 p-4 rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-emerald-300 block">1. Gemini API Key (필수 기능 전체)</span>
+                  <span className="text-[11px] text-slate-400">대본/팩트체크/트렌드/TTS 등 전체 AI 기능에 사용 — 내 키를 등록하면 내 사용량으로만 청구됩니다</span>
+                </div>
+                {geminiStatus.isSuccess ? (
+                  <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-bold flex items-center space-x-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    <span>내 키 사용 중</span>
+                  </span>
+                ) : (
+                  <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded font-bold">
+                    미등록 (기본 제공 키 사용 중)
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="password"
+                  value={geminiKey}
+                  onChange={(e) => setGeminiKey(e.target.value)}
+                  placeholder="Gemini API Key (AIza... 또는 AQ...)"
+                  className="flex-1 bg-[#100d21] border border-[#393163] focus:border-emerald-500 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-600 outline-none font-mono"
+                />
+                <button
+                  onClick={() => handleValidateKey('gemini')}
+                  disabled={geminiStatus.loading}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3.5 py-2 rounded-lg text-xs transition flex items-center space-x-1 disabled:opacity-50 min-h-[36px]"
+                >
+                  {geminiStatus.loading ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-100" />
+                  ) : (
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-100" />
+                  )}
+                  <span>저장 & 검증</span>
+                </button>
+                {geminiStatus.isSuccess && (
+                  <button
+                    onClick={handleClearGeminiKey}
+                    title="내 키 제거하고 기본 키로 되돌리기"
+                    className="bg-[#211c3a] hover:bg-[#2b254a] text-slate-300 border border-[#3b3260] px-3 py-2 rounded-lg text-xs transition min-h-[36px]"
+                  >
+                    제거
+                  </button>
+                )}
+              </div>
+
+              {geminiStatus.message && (
+                <p className={`text-[11px] font-mono p-2 rounded border ${
+                  geminiStatus.isSuccess
+                    ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-300'
+                    : 'bg-amber-950/60 border-amber-800/60 text-amber-300'
+                }`}>
+                  {geminiStatus.message}
+                </p>
+              )}
+            </div>
+
             {/* Typecast API Key Card */}
             <div className="bg-[#1a172e] border border-[#332c58] p-4 rounded-xl space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-bold text-purple-300 block">1. Typecast API Key (타입캐스트)</span>
+                  <span className="text-xs font-bold text-purple-300 block">2. Typecast API Key (타입캐스트)</span>
                   <span className="text-[11px] text-slate-400">내 클론 보이스 및 타입캐스트 120+ 성우 라이브러리 자동 연동</span>
                 </div>
                 {typecastStatus.isSuccess ? (
@@ -294,7 +369,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
             <div className="bg-[#1a172e] border border-[#332c58] p-4 rounded-xl space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-bold text-indigo-300 block">2. ElevenLabs API Key (일레븐랩스)</span>
+                  <span className="text-xs font-bold text-indigo-300 block">3. ElevenLabs API Key (일레븐랩스)</span>
                   <span className="text-[11px] text-slate-400">초고품질 다국어 음성 합성 및 클론 보이스 어댑터 연동</span>
                 </div>
                 {elevenlabsStatus.isSuccess ? (

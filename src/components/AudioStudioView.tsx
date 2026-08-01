@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AudioConfig, SceneItem } from '../types';
 import { generateSrtSubtitles, downloadFile } from '../utils/exportUtils';
+import { apiFetch } from '../utils/apiClient';
 import {
   Volume2,
   Mic,
@@ -134,7 +135,7 @@ export const AudioStudioView: React.FC<AudioStudioViewProps> = ({
       : localStorage.getItem('lucy_api_elevenlabs_key');
 
     try {
-      const res = await fetch('/api/tts/preview', {
+      const res = await apiFetch('/api/tts/preview', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -281,7 +282,7 @@ export const AudioStudioView: React.FC<AudioStudioViewProps> = ({
     const fullNarration = scenes.map((s) => s.narration).join(' ');
 
     try {
-      const response = await fetch('/api/generate-tts', {
+      const response = await apiFetch('/api/generate-tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

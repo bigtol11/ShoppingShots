@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { SceneItem, ClipCandidate, SourceGrade } from '../types';
+import { apiFetch } from '../utils/apiClient';
 import {
   Film,
   Play,
@@ -59,7 +60,7 @@ export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
     setIsGeneratingStoryboard(true);
     setStoryboardError(null);
     try {
-      const res = await fetch('/api/generate-storyboard', {
+      const res = await apiFetch('/api/generate-storyboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scriptText, targetDuration })
@@ -219,7 +220,7 @@ export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
   const handleGenerateAiPrompt = async (scene: SceneItem) => {
     setIsGeneratingAiPrompt(true);
     try {
-      const response = await fetch('/api/generate-ai-video-prompt', {
+      const response = await apiFetch('/api/generate-ai-video-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

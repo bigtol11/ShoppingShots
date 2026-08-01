@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ProductFacts } from '../types';
 import { MOCK_PROJECTS } from '../mockData';
+import { apiFetch } from '../utils/apiClient';
 import {
   Download,
   Link as LinkIcon,
@@ -64,7 +65,7 @@ export const ProductImportView: React.FC<ProductImportViewProps> = ({
 
       // Call both analyze and pipeline-v2
       const [res1, res2] = await Promise.all([
-        fetch('/api/analyze-product', {
+        apiFetch('/api/analyze-product', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -73,7 +74,7 @@ export const ProductImportView: React.FC<ProductImportViewProps> = ({
             productJson: dataToAnalyze || productInfo
           })
         }).then((r) => r.json()),
-        fetch('/api/gemini-pipeline-v2', {
+        apiFetch('/api/gemini-pipeline-v2', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

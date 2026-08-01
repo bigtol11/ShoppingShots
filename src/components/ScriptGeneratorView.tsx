@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ProductFacts, ScriptCandidate } from '../types';
+import { apiFetch } from '../utils/apiClient';
 import {
   Sparkles,
   CheckCircle2,
@@ -85,7 +86,7 @@ export const ScriptGeneratorView: React.FC<ScriptGeneratorViewProps> = ({
   const handleGenerateScript = async () => {
     setIsGenerating(true);
     try {
-      const response = await fetch('/api/generate-scripts', {
+      const response = await apiFetch('/api/generate-scripts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

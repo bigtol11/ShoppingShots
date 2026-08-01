@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Flame, Sparkles, TrendingUp, ExternalLink, ArrowRight, Play, CheckCircle2, Search, Video, ChevronDown, X } from 'lucide-react';
+import { apiFetch } from '../utils/apiClient';
 
 interface TrendTopic {
   id: string;
@@ -46,7 +47,7 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
     setIsAutoLoading(true);
     setAutoError(null);
     try {
-      const res = await fetch('/api/trends/auto-recommend', {
+      const res = await apiFetch('/api/trends/auto-recommend', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({})
@@ -96,7 +97,7 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
   const handleAnalyzeTrends = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/trends/analyze', {
+      const res = await apiFetch('/api/trends/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category, keyword })

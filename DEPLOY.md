@@ -26,7 +26,8 @@ $env:Path += ";C:\Users\ADMIN\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bi
 | `GEMINI_API_KEY` | https://aistudio.google.com/apikey |
 | `JWT_SECRET` | 아무 랜덤 문자열 32자 이상 (`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`) |
 | `ALLOWED_EMAILS` | 로그인 허용할 구글 계정 이메일, 쉼표로 구분 |
-| `FAL_KEY` / `ADMIN_SECRET` | 선택사항, 안 쓰면 비워둠 |
+| `FAL_KEY` | fal.ai AI 영상 생성용, 선택사항 |
+| `ADMIN_EMAILS` | 관리자(fal.ai 키 관리 등) 권한을 줄 구글 계정 이메일 — 보통 `ALLOWED_EMAILS`와 동일 |
 | `service-account.json` | Firebase 콘솔 → 프로젝트 설정 → 서비스 계정 → 새 비공개 키 생성 |
 
 ## 2. 서비스 계정 키를 Secret Manager에 등록 (최초 1회만)
