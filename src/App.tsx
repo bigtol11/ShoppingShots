@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ProjectData, ProductFacts, ScriptCandidate, SceneItem, AudioConfig, CompletedProject } from './types';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
-import { LoginView } from './components/LoginView';
 import { TrendBenchmarkingView } from './components/TrendBenchmarkingView';
 import { ProductImportView } from './components/ProductImportView';
 import { ScriptGeneratorView } from './components/ScriptGeneratorView';
@@ -13,6 +12,7 @@ import { VideoPreviewPlayer } from './components/VideoPreviewPlayer';
 import { SettingsView } from './components/SettingsView';
 import { ProjectsView } from './components/ProjectsView';
 import { saveCompletedProject } from './utils/projectsStore';
+import { signInWithGoogle } from './utils/firebaseAuth';
 import { AlertTriangle, ArrowRight } from 'lucide-react';
 
 const DEFAULT_EMPTY_PROJECT: ProjectData = {
@@ -57,6 +57,8 @@ const STEP_SEQUENCE = ['trend', 'product', 'script', 'storyboard', 'audio', 'ren
 export default function App() {
   const [authUser, setAuthUser] = useState<{ id: string; email: string } | null>(null);
   const [isAuthChecked, setIsAuthChecked] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -67,6 +69,31 @@ export default function App() {
       .catch(() => {})
       .finally(() => setIsAuthChecked(true));
   }, []);
+
+  const handleGoogleLogin = async () => {
+    setIsLoggingIn(true);
+    setAuthError(null);
+    try {
+      const idToken = await signInWithGoogle();
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken })
+      });
+      const data = await res.json();
+      if (data?.status === 'success' && data?.user) {
+        setAuthUser(data.user);
+      } else {
+        setAuthError(data?.message || '로그인에 실패했습니다.');
+      }
+    } catch (err: any) {
+      if (err?.code !== 'auth/popup-closed-by-user') {
+        setAuthError('구글 로그인에 실패했습니다.');
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -222,19 +249,24 @@ export default function App() {
     return <div className="min-h-screen w-full bg-[#0f0e17]" />;
   }
 
-  if (!authUser) {
-    return <LoginView onAuthenticated={setAuthUser} />;
-  }
-
   return (
     <div className="flex flex-col h-screen w-screen bg-[#0f0e17] text-slate-100 font-sans overflow-hidden">
       <Header
         activeTab={activeStep}
         setActiveTab={setActiveStep}
         projectName={project.productInfo.product_name || project.name}
-        userEmail={authUser.email}
+        userEmail={authUser?.email}
         onLogout={handleLogout}
+        onLogin={handleGoogleLogin}
+        isLoggingIn={isLoggingIn}
       />
+
+      {authError && (
+        <div className="bg-rose-950/80 border-b border-rose-800 text-rose-200 text-xs px-4 py-2 flex items-center justify-between">
+          <span>{authError}</span>
+          <button onClick={() => setAuthError(null)} className="text-rose-300 hover:text-white px-2">✕</button>
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden relative">
         <Sidebar

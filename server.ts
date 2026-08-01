@@ -7,12 +7,12 @@ import { promisify } from 'util';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
-import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import cookieParser from 'cookie-parser';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
+import { getAuth } from 'firebase-admin/auth';
 
 dotenv.config();
 
@@ -55,7 +55,6 @@ if (!fs.existsSync(serverDataDir)) {
     console.warn('[Directory creation warning]', err);
   }
 }
-const usersFilePath = path.join(serverDataDir, 'users.json');
 const jwtSecretPath = path.join(serverDataDir, '.jwt_secret');
 const projectsDir = path.join(serverDataDir, 'projects');
 if (!fs.existsSync(projectsDir)) {
@@ -108,104 +107,43 @@ function getJwtSecret(): string {
   return generated;
 }
 const JWT_SECRET = getJwtSecret();
-const SIGNUP_INVITE_CODE = process.env.SIGNUP_INVITE_CODE || '';
 const AUTH_COOKIE = 'lucy_session';
 
-interface StoredUser {
-  id: string;
-  email: string;
-  passwordHash: string;
-  createdAt: string;
-}
+// Comma-separated allowlist of Google account emails permitted to sign in. Empty = nobody can
+// sign in (fail closed) — this is the access-control gate now that anyone with a Google account
+// could otherwise reach the sign-in popup.
+const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '')
+  .split(',')
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
 
-function readUsersLocal(): StoredUser[] {
+app.post('/api/auth/google', async (req, res) => {
   try {
-    if (!fs.existsSync(usersFilePath)) return [];
-    return JSON.parse(fs.readFileSync(usersFilePath, 'utf-8'));
-  } catch {
-    return [];
-  }
-}
-function writeUsersLocal(users: StoredUser[]) {
-  fs.writeFileSync(usersFilePath, JSON.stringify(users, null, 2));
-}
+    if (!isFirebaseConfigured) {
+      return res.status(503).json({ status: 'error', message: 'Google 로그인이 서버에 설정되지 않았습니다.' });
+    }
+    const { idToken } = req.body || {};
+    if (!idToken || typeof idToken !== 'string') {
+      return res.status(400).json({ status: 'error', message: 'Google 로그인 토큰이 없습니다.' });
+    }
 
-async function findUserByEmail(email: string): Promise<StoredUser | null> {
-  const emailLower = email.toLowerCase();
-  if (isFirebaseConfigured && firestoreDb) {
-    const snap = await firestoreDb.collection('users').where('emailLower', '==', emailLower).limit(1).get();
-    if (snap.empty) return null;
-    const doc = snap.docs[0];
-    const data = doc.data();
-    return { id: doc.id, email: data.email, passwordHash: data.passwordHash, createdAt: data.createdAt };
-  }
-  return readUsersLocal().find((u) => u.email.toLowerCase() === emailLower) || null;
-}
+    let decoded;
+    try {
+      decoded = await getAuth().verifyIdToken(idToken);
+    } catch (err: any) {
+      return res.status(401).json({ status: 'error', message: 'Google 로그인 인증에 실패했습니다.' });
+    }
 
-async function createUser(email: string, passwordHash: string): Promise<StoredUser> {
-  const id = `u_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const newUser: StoredUser = { id, email, passwordHash, createdAt: new Date().toISOString() };
-  if (isFirebaseConfigured && firestoreDb) {
-    await firestoreDb.collection('users').doc(id).set({
-      email,
-      emailLower: email.toLowerCase(),
-      passwordHash,
-      createdAt: newUser.createdAt
-    });
-    return newUser;
-  }
-  const users = readUsersLocal();
-  users.push(newUser);
-  writeUsersLocal(users);
-  return newUser;
-}
+    const email = (decoded.email || '').toLowerCase();
+    if (!decoded.email_verified || !ALLOWED_EMAILS.includes(email)) {
+      return res.status(403).json({ status: 'error', message: '이 계정은 접근이 허용되지 않았습니다.' });
+    }
 
-app.post('/api/auth/register', async (req, res) => {
-  try {
-    const { email, password, inviteCode } = req.body || {};
-    if (!SIGNUP_INVITE_CODE) {
-      return res.status(503).json({ status: 'error', message: '회원가입이 비활성화되어 있습니다. 서버에 SIGNUP_INVITE_CODE 환경변수를 설정해 주세요.' });
-    }
-    if (inviteCode !== SIGNUP_INVITE_CODE) {
-      return res.status(401).json({ status: 'error', message: '초대코드가 올바르지 않습니다.' });
-    }
-    if (!email || typeof email !== 'string' || !/^\S+@\S+\.\S+$/.test(email)) {
-      return res.status(400).json({ status: 'error', message: '유효한 이메일을 입력해 주세요.' });
-    }
-    if (!password || typeof password !== 'string' || password.length < 8) {
-      return res.status(400).json({ status: 'error', message: '비밀번호는 8자 이상이어야 합니다.' });
-    }
-    const existing = await findUserByEmail(email);
-    if (existing) {
-      return res.status(409).json({ status: 'error', message: '이미 가입된 이메일입니다.' });
-    }
-    const passwordHash = await bcrypt.hash(password, 10);
-    const newUser = await createUser(email, passwordHash);
-
-    const token = jwt.sign({ uid: newUser.id, email: newUser.email }, JWT_SECRET, { expiresIn: '30d' });
+    const token = jwt.sign({ uid: decoded.uid, email: decoded.email }, JWT_SECRET, { expiresIn: '30d' });
     res.cookie(AUTH_COOKIE, token, { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
-    res.json({ status: 'success', user: { id: newUser.id, email: newUser.email } });
+    res.json({ status: 'success', user: { id: decoded.uid, email: decoded.email } });
   } catch (err: any) {
-    res.status(500).json({ status: 'error', message: '회원가입 처리 실패: ' + (err?.message || '') });
-  }
-});
-
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { email, password } = req.body || {};
-    const user = await findUserByEmail(String(email || ''));
-    if (!user) {
-      return res.status(401).json({ status: 'error', message: '이메일 또는 비밀번호가 올바르지 않습니다.' });
-    }
-    const ok = await bcrypt.compare(password || '', user.passwordHash);
-    if (!ok) {
-      return res.status(401).json({ status: 'error', message: '이메일 또는 비밀번호가 올바르지 않습니다.' });
-    }
-    const token = jwt.sign({ uid: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
-    res.cookie(AUTH_COOKIE, token, { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
-    res.json({ status: 'success', user: { id: user.id, email: user.email } });
-  } catch (err: any) {
-    res.status(500).json({ status: 'error', message: '로그인 처리 실패: ' + (err?.message || '') });
+    res.status(500).json({ status: 'error', message: 'Google 로그인 처리 실패: ' + (err?.message || '') });
   }
 });
 

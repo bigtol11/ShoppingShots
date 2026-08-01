@@ -1,54 +1,90 @@
 # Cloud Run 배포 가이드
 
-`Dockerfile`에 ffmpeg가 이미 포함되어 있고, `npm run build`를 로컬에서 실제로 실행해 정상 빌드되는 것까지 확인했습니다. gcloud CLI로 소스에서 바로 빌드/배포할 수 있습니다.
+이미 한 번 실제로 배포해서 검증된 절차입니다: **https://shoppingshots-823154324409.us-west1.run.app**
 
-## 1. 사전 준비
+## 0. gcloud 설정 — ShortDramaProject와 절대 섞이지 않도록
 
-- [gcloud CLI](https://cloud.google.com/sdk/docs/install) 설치 및 `gcloud auth login`
-- 배포할 GCP 프로젝트 선택: `gcloud config set project <PROJECT_ID>`
+이 PC의 gcloud에는 `shoppingshots`라는 별도 설정(configuration)이 있습니다
+(계정 `bigtol11@gmail.com`, 프로젝트 `shoppingshots-prod`). `default` 설정은
+ShortDramaProject의 GCP 프로젝트를 가리키고 있으니 **절대 건드리지 마세요.**
 
-## 2. 배포 명령
+모든 gcloud 명령에 반드시 `--configuration=shoppingshots`를 붙이세요:
+
+```bash
+gcloud config configurations list   # shoppingshots가 있는지, default와 분리되어 있는지 확인
+```
+
+gcloud 바이너리가 새로 연 셸의 PATH에 없을 수 있습니다 — 그럴 땐:
+```powershell
+$env:Path += ";C:\Users\ADMIN\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin"
+```
+
+## 1. 필요한 값들
+
+| 값 | 어디서 |
+|---|---|
+| `GEMINI_API_KEY` | https://aistudio.google.com/apikey |
+| `JWT_SECRET` | 아무 랜덤 문자열 32자 이상 (`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`) |
+| `ALLOWED_EMAILS` | 로그인 허용할 구글 계정 이메일, 쉼표로 구분 |
+| `FAL_KEY` / `ADMIN_SECRET` | 선택사항, 안 쓰면 비워둠 |
+| `service-account.json` | Firebase 콘솔 → 프로젝트 설정 → 서비스 계정 → 새 비공개 키 생성 |
+
+## 2. 서비스 계정 키를 Secret Manager에 등록 (최초 1회만)
+
+```bash
+gcloud secrets create shoppingshots-service-account --data-file="service-account.json" --configuration=shoppingshots
+
+# Cloud Run이 이 비밀을 읽을 수 있도록 권한 부여 (PROJECT_NUMBER는 아래 명령으로 확인)
+gcloud projects describe shoppingshots-prod --format="value(projectNumber)" --configuration=shoppingshots
+gcloud secrets add-iam-policy-binding shoppingshots-service-account \
+  --member="serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor" \
+  --configuration=shoppingshots
+```
+
+이미 등록되어 있다면 (재배포 시) 이 단계는 건너뛰어도 됩니다. 키가 바뀌었다면
+`gcloud secrets versions add shoppingshots-service-account --data-file="service-account.json"`
+로 새 버전만 추가하세요.
+
+⚠️ **`/app/service-account.json`처럼 앱 디렉터리 안쪽 경로에 마운트하지 마세요.**
+Cloud Run의 시크릿 파일 마운트는 그 파일이 위치할 디렉터리 전체를 새 볼륨으로
+덮어씁니다 — `/app`에 마운트하면 `dist/`, `node_modules/` 등 이미지 안의 다른
+파일이 전부 보이지 않게 되어 컨테이너가 시작 실패합니다 (`Cannot find module
+'/app/dist/server.cjs'`). 반드시 `/secrets/...`처럼 앱과 무관한 경로에 마운트하고,
+`FIREBASE_SERVICE_ACCOUNT_PATH` 환경변수로 그 경로를 알려줘야 합니다.
+
+## 3. 배포 명령
 
 ```bash
 gcloud run deploy shoppingshots \
   --source . \
   --region us-west1 \
   --allow-unauthenticated \
-  --min-instances=1 \
   --max-instances=1 \
-  --set-env-vars GEMINI_API_KEY=<값>,JWT_SECRET=<임의의_긴_랜덤_문자열>,SIGNUP_INVITE_CODE=<지인들에게_알려줄_초대코드>,FAL_KEY=<선택사항>,ADMIN_SECRET=<선택사항>
+  --set-env-vars "GEMINI_API_KEY=<값>,JWT_SECRET=<값>,ALLOWED_EMAILS=<이메일1,이메일2>,FIREBASE_SERVICE_ACCOUNT_PATH=/secrets/service-account.json" \
+  --set-secrets="/secrets/service-account.json=shoppingshots-service-account:latest" \
+  --configuration=shoppingshots
 ```
 
-`--source .`를 쓰면 gcloud가 Cloud Build로 `Dockerfile`을 자동으로 빌드해서 올려줍니다. `Dockerfile`을 직접 만들 필요가 없습니다.
+`--source .`를 쓰면 gcloud가 Cloud Build로 `Dockerfile`을 자동으로 빌드해서
+올려줍니다. `--max-instances=1`은 필수입니다 — 렌더링 작업 상태(`renderJobs`)가
+인스턴스 메모리에만 있어서, 인스턴스가 2개 이상 뜨면 상태 조회 요청이 다른
+인스턴스로 가서 404가 날 수 있습니다. `--min-instances`는 굳이 안 정해도
+됩니다 (기본 0 — 트래픽 없을 때 비용 절감, 첫 요청만 콜드스타트로 조금 느림).
 
-## 3. 저장소: Firestore + Cloud Storage (권장) vs 로컬 디스크
+## 4. Google 로그인 설정 (API로는 불가능한 유일한 수동 단계)
 
-서버 코드는 `service-account.json`이 프로젝트 루트에 있으면 **자동으로** 계정/프로젝트 데이터는 Firestore에, 업로드/렌더 결과물은 Cloud Storage에 저장합니다. 파일이 없으면 컨테이너 로컬 디스크(`server_data/`, `public/uploads/`, `public/exports/`)로 자동 전환됩니다.
-
-- **Firestore/Cloud Storage 없이 배포하면** (`service-account.json` 미포함) — 로컬 디스크에 저장되므로 Cloud Run이 인스턴스를 재시작/교체할 때마다 가입 계정/프로젝트/업로드 파일이 전부 사라집니다. `--min-instances=1 --max-instances=1`로 임시 방편은 가능하지만 재배포 시엔 여전히 날아갑니다.
-- **Firestore/Cloud Storage를 붙이면** — 이 제약이 사라집니다. 별도의 새 Firebase 프로젝트(예: `shoppingshots-prod`, **ShortDramaProject의 Firebase 프로젝트와는 완전히 별개**)에서 Firestore + Storage를 활성화하고 서비스 계정 키를 발급받아야 합니다.
-
-### 로컬 개발 시 연결하기
-1. Firebase 콘솔 → 새 프로젝트 생성 → Firestore Database 활성화 → Storage 활성화
-2. 프로젝트 설정 → 서비스 계정 → "새 비공개 키 생성" → JSON 다운로드
-3. 다운로드한 파일을 `E:\ShoppingShots\service-account.json`으로 저장 (`.gitignore`/`.dockerignore`에 이미 등록되어 있어 커밋되지 않습니다)
-4. `npm run dev` 실행 시 로그에 `[Firebase Admin] Initialized — Firestore + Cloud Storage ENABLED` 가 뜨면 연결 성공
-
-### Cloud Run 배포 시 연결하기
-컨테이너 이미지에는 `service-account.json`을 절대 포함시키지 않습니다 (이미 `.dockerignore`에서 제외됨). 대신 Cloud Run의 서비스 계정 자체에 Firestore/Storage 권한을 부여하고, 별도 인증 파일 없이 [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials)로 인증하는 방식을 권장합니다 — 이 부분은 실제 배포 시점에 같이 봐드리겠습니다.
-
-## 4. JWT_SECRET / SIGNUP_INVITE_CODE / ADMIN_SECRET 값 정하기
-
-- `JWT_SECRET`: 아무 랜덤 문자열이나 32자 이상으로. 예: `openssl rand -hex 32` (또는 아무 비밀번호 생성기)
-- `SIGNUP_INVITE_CODE`: 지인들에게 공유할 가입 코드. 비워두면 가입 자체가 막힙니다(기존 계정 로그인은 가능).
-- `ADMIN_SECRET`: fal.ai 키 관리 등 관리자 전용 기능을 쓸 계획이 없다면 비워둬도 됩니다(그 기능들은 자동으로 비활성화됨).
-
-민감한 값들은 나중에 `--set-env-vars` 대신 [Secret Manager](https://cloud.google.com/run/docs/configuring/secrets)로 옮기는 걸 권장합니다 (지금 단계에선 필수는 아닙니다).
+Firebase 콘솔 → 해당 프로젝트 → **Authentication → Sign-in method → Google →
+사용 설정(Enable)**. 이 토글 하나만 콘솔에서 직접 켜야 합니다. 웹앱 등록/설정값은
+Firebase Management API로 자동 처리했고 (`src/firebaseConfig.ts`에 이미 반영,
+민감정보 아니라 커밋해도 안전), 로그인 자체는 `ALLOWED_EMAILS`에 등록된 이메일만
+허용됩니다 (Google 계정만 있으면 아무나 되는 게 아닙니다).
 
 ## 5. 배포 후 확인
 
 ```bash
-gcloud run services describe shoppingshots --region us-west1 --format='value(status.url)'
+gcloud run services describe shoppingshots --region us-west1 --format='value(status.url)' --configuration=shoppingshots
 ```
 
-나온 URL로 접속해서 초대코드로 가입 → 로그인 → 파이프라인 진행이 되는지 확인하세요.
+나온 URL로 접속해서 우측 상단 "Google로 로그인" → `ALLOWED_EMAILS`에 등록된
+계정으로 로그인 → 파이프라인 진행이 되는지 확인하세요.

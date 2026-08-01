@@ -1,5 +1,5 @@
 import React from 'react';
-import { Star, Moon, FolderKanban, Settings, Sparkles, LogOut } from 'lucide-react';
+import { Star, Moon, FolderKanban, Settings, Sparkles, LogOut, LogIn, RefreshCw } from 'lucide-react';
 
 interface HeaderProps {
   activeTab: string;
@@ -7,9 +7,11 @@ interface HeaderProps {
   projectName: string;
   userEmail?: string;
   onLogout?: () => void;
+  onLogin?: () => void;
+  isLoggingIn?: boolean;
 }
 
-export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, projectName, userEmail, onLogout }) => {
+export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, projectName, userEmail, onLogout, onLogin, isLoggingIn }) => {
   return (
     <header className="bg-[#12111d] border-b border-[#2d2948] px-4 py-2.5 flex items-center justify-between text-slate-200 select-none sticky top-0 z-50">
       <div className="flex items-center space-x-6">
@@ -68,25 +70,36 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, project
           <Moon className="w-4 h-4" />
         </button>
 
-        {userEmail && (
-          <div className="hidden md:flex items-center space-x-2 bg-[#1b1731] border border-[#332c58] px-2.5 py-1 rounded-md text-[11px] text-slate-300 max-w-[160px] truncate">
-            {userEmail}
-          </div>
+        {userEmail ? (
+          <>
+            <div className="hidden md:flex items-center space-x-2 bg-[#1b1731] border border-[#332c58] px-2.5 py-1 rounded-md text-[11px] text-slate-300 max-w-[160px] truncate">
+              {userEmail}
+            </div>
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                title="로그아웃"
+                className="p-1.5 text-slate-400 hover:text-rose-300 hover:bg-[#201c3b] rounded-lg transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
+            <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-purple-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold border border-purple-400/30 shadow-sm">
+              S
+            </div>
+          </>
+        ) : (
+          onLogin && (
+            <button
+              onClick={onLogin}
+              disabled={isLoggingIn}
+              className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-900 hover:bg-slate-100 transition shadow-md disabled:opacity-60"
+            >
+              {isLoggingIn ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
+              <span>Google로 로그인</span>
+            </button>
+          )
         )}
-
-        {onLogout && (
-          <button
-            onClick={onLogout}
-            title="로그아웃"
-            className="p-1.5 text-slate-400 hover:text-rose-300 hover:bg-[#201c3b] rounded-lg transition-colors"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        )}
-
-        <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-purple-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold border border-purple-400/30 shadow-sm">
-          S
-        </div>
       </div>
     </header>
   );
