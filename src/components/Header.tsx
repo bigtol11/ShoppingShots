@@ -1,5 +1,5 @@
 import React from 'react';
-import { Star, Moon, FolderKanban, Settings, Sparkles, LogOut, LogIn, RefreshCw, Menu } from 'lucide-react';
+import { Star, Moon, FolderKanban, Settings, Sparkles, LogOut, LogIn, RefreshCw, Menu, Home } from 'lucide-react';
 
 interface HeaderProps {
   activeTab: string;
@@ -27,8 +27,12 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, project
           </button>
         )}
 
-        {/* Brand Logo */}
-        <div className="flex items-center space-x-1.5 sm:space-x-2 min-w-0">
+        {/* Brand Logo — also doubles as a home button */}
+        <button
+          onClick={() => setActiveTab('trend')}
+          title="첫 화면으로"
+          className="flex items-center space-x-1.5 sm:space-x-2 min-w-0 hover:opacity-80 transition-opacity"
+        >
           <div className="bg-gradient-to-tr from-purple-600 to-indigo-500 p-1.5 rounded-lg shadow-md shadow-purple-900/30 shrink-0">
             <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
           </div>
@@ -41,10 +45,22 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, project
             </span>
             <Star className="hidden sm:block w-4 h-4 fill-amber-400 text-amber-400 shrink-0" />
           </div>
-        </div>
+        </button>
 
         {/* Navigation Bar */}
         <nav className="hidden md:flex items-center space-x-2 text-xs font-medium text-slate-300">
+          <button
+            onClick={() => setActiveTab('trend')}
+            title="첫 화면(트렌드 탐색)으로 돌아가기"
+            className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition-colors ${
+              activeTab === 'trend'
+                ? 'bg-purple-600/30 text-purple-200 border border-purple-500/40 font-semibold shadow-sm'
+                : 'hover:bg-[#1d1a33] hover:text-white'
+            }`}
+          >
+            <Home className="w-3.5 h-3.5 text-purple-400" />
+            <span>🏠 첫 화면</span>
+          </button>
           <button
             onClick={() => setActiveTab('projects')}
             className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition-colors ${
