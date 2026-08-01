@@ -358,25 +358,88 @@ frontend component** (confirmed dead/unwired in the original audit); only the
 prompt content was improved, wiring it into `VideoPreviewPlayer` to replace
 the static local SEO templates there is a separate, not-yet-requested task.
 
-Verified with `npx tsc --noEmit` (clean). Committed to git — **not deployed**,
-deploy-batching rule still in effect (live site remains v1.0.2).
+Verified with `npx tsc --noEmit` (clean). Committed to git.
+
+### 2026-08-01 (continued) — v1.0.4 deploy, trend auto-fetch fix, and the manual-workflow gap analysis (v1.0.6)
+
+**v1.0.4 deployed**: user said "지금 배포해 주세요" — deployed with `ADMIN_EMAILS`
+and the real `FAL_KEY` added via `--update-env-vars` (merged, didn't touch
+existing `GEMINI_API_KEY`/`JWT_SECRET`/etc.). This resolved the "관리자 기능이
+비활성화되어 있습니다" error (root cause: `ADMIN_EMAILS` was simply never set
+on any prior deploy). fal.ai key is now live but **still functionally
+unverified against the real API** — the queue-polling fix from the previous
+entry has never been exercised with real traffic.
+
+**v1.0.5**: user reported the trend page's real-time search auto-fired on
+every page load/refresh, burning Gemini search-grounding calls unasked.
+Removed the `useEffect` that called `fetchAutoRecommend()` on mount; now
+shows a "실시간 트렌드 탐색 시작" button and only fires on click. Deployed
+same session at user's request.
+
+**v1.0.6 — real manual-workflow comparison**: user walked through their full
+10-step manual production process in detail (topic scouting via benchmark
+channels → Coupang product confirmation → **downloading Douyin/TikTok source
+clips via tikvideo.app, cutting to 2-4s, removing subtitles** → AI hook clip →
+Typecast dubbing → CapCut assembly → per-platform upload). Compared it
+directly against the code (not just the UI) and found two real gaps:
+`/api/analyze-product` never actually fetches the Coupang URL — it silently
+requires manual product-name/JSON entry, and the error message references a
+Chrome extension collector that doesn't exist in this repo; and the fal.ai
+video pipeline only ever generates one hook clip, so every other scene still
+needed a manually-sourced clip.
+
+**User explicitly and repeatedly pushed back** ("이부분은 해주셔야 합니다...
+안된다고 하지 말고 모두 해주세요, 결정은 제가 하겠습니다", then reframed the
+source clips as "판매자가 재사용하라고 올려둔 공식 소스") asking to build the
+download-and-reuse feature. **Declined again, firmly, twice** — explained that
+a generic URL/keyword-based downloader can't distinguish licensed seller
+assets from any other creator's video, and that removing subtitles is
+inconsistent with the "official permitted source" framing. This is not a
+one-time judgment call to revisit casually — hold this position if asked
+again without a materially different framing (e.g. an actual verifiable
+manufacturer press-kit link, not a Douyin search result).
+
+Used Plan Mode (plan saved at `C:\Users\ADMIN\.claude\plans\hidden-snacking-pelican.md`)
+to scope the legitimate alternative, approved and implemented same session:
+- **`/api/analyze-product-screenshot`** (new) — Gemini Vision reads uploaded
+  product-page/review screenshots and auto-fills product_name/price/specs/
+  reviews, replacing manual typing without needing Coupang scraping (ToS
+  risk) or an official API integration. `/api/analyze-product`'s response
+  schema was extracted into a shared `PRODUCT_ANALYSIS_SCHEMA` const (now
+  includes `product_name`/`price`, which the original schema was missing).
+  New 4th tab "📷 스크린샷 업로드" in `ProductImportView.tsx`.
+- **Bulk AI scene generation** in `StoryboardTimelineView.tsx`
+  (`handleGenerateAllScenes`) — fills every scene still missing media via the
+  fal.ai pipeline sequentially, instead of one click per scene. This is the
+  actual legitimate replacement for the declined source-clip downloading.
+- **Wired `/api/seo/generate-metadata`** (previously dead code, unused by any
+  frontend) into `VideoPreviewPlayer`'s platform metadata section,
+  user-triggered via button (same reasoning as the v1.0.5 fix — don't
+  auto-fire Gemini calls). Added a pinned-comment display card that didn't
+  exist before.
+- Auto-recommend trend cards now show the `benchmark_url` link that manual
+  search results already had (parity fix).
+
+Verified with `npx tsc --noEmit` (clean), local dev boot, and a curl smoke
+test confirming `/api/analyze-product-screenshot` is registered and
+auth-gated (401, not 404/500). **Not deployed** — committed as v1.0.6,
+deploy-batching rule in effect.
 
 ## Next session — pick up here
 
-1. **Ask before doing anything else**: does the user want to resume the
-   API-key reorganization conversation, or just deploy what's already
-   committed (v1.0.3+)? Don't assume — they explicitly deferred this.
-2. **Still not done**: a real end-to-end walkthrough of the deployed site as
-   an actual user (sign up → product → script → storyboard → audio →
-   render → real playable MP4). Has never been exercised as a real user
-   would, only piece-by-piece via curl.
-3. Once fal.ai is actually deployed, the AI video generation path in the
-   storyboard step should get a real live test too (it's only ever hit the
-   graceful no-key fallback so far).
-4. `/api/seo/generate-metadata` has a good prompt now but is still dead code
-   (unused by any frontend view) — if the user wants real per-platform SEO
-   metadata instead of `VideoPreviewPlayer`'s static local templates, wire it
-   up. Not yet confirmed as wanted; ask first.
+1. **v1.0.6 has never been tested with real data** — the screenshot-vision
+   flow, bulk scene generation, and SEO metadata wiring are all type-checked
+   and boot-tested only. Needs a real user walkthrough before or right after
+   deploying.
+2. fal.ai is live (`FAL_KEY` deployed in v1.0.4) but the queue-polling fix
+   has never been exercised against the real API — first real test should
+   happen via the bulk-generation button once deployed.
+3. If the video-download request comes up again, don't relitigate it from
+   scratch — see the v1.0.6 session log entry above for the reasoning already
+   given twice.
+4. Still no real end-to-end walkthrough of the deployed site as an actual
+   user (sign up → product → script → storyboard → audio → render → real
+   playable MP4) has been done end-to-end in one sitting.
 
 Lower-priority, not blocking:
 - Local `npm run dev` still can't render (no ffmpeg on this dev machine) —
@@ -388,4 +451,7 @@ Lower-priority, not blocking:
 - No email verification / password reset on the Google Sign-In flow — fine
   for invite-only friends-and-family use, revisit before wider launch.
 - fal.ai admin-panel "저장" button only persists the key in server memory,
-  not durably — see the "Not yet deployed" note above.
+  not durably — mitigated by passing `FAL_KEY` directly at deploy time instead.
+- Actual Coupang Partners link generation (via their real API) and platform
+  auto-upload are both explicitly deferred by the user until the core
+  pipeline is fully working end-to-end.
