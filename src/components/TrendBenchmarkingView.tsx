@@ -36,16 +36,19 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
   const [keyword, setKeyword] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
 
-  // Auto-recommended trends — fetched once on page load via real Google Search grounding,
-  // so the page isn't a blank form the user has to fill in before seeing anything.
+  // Auto-recommended trends — real Google Search grounding, but ONLY runs when the
+  // user explicitly clicks the button below. Auto-firing on every page load / app
+  // open was burning search-grounded Gemini calls the user never asked for.
   const [autoTrends, setAutoTrends] = useState<TrendTopic[]>([]);
   const [isAutoLoading, setIsAutoLoading] = useState<boolean>(false);
   const [autoError, setAutoError] = useState<string | null>(null);
   const [autoGroundedAt, setAutoGroundedAt] = useState<string | null>(null);
+  const [hasRunAuto, setHasRunAuto] = useState<boolean>(false);
 
   const fetchAutoRecommend = async () => {
     setIsAutoLoading(true);
     setAutoError(null);
+    setHasRunAuto(true);
     try {
       const res = await apiFetch('/api/trends/auto-recommend', {
         method: 'POST',
@@ -65,11 +68,6 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
       setIsAutoLoading(false);
     }
   };
-
-  useEffect(() => {
-    fetchAutoRecommend();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const categoryDropdownRef = useRef<HTMLDivElement>(null);
   const keywordInputRef = useRef<HTMLInputElement>(null);
@@ -134,7 +132,7 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
         </div>
       </div>
 
-      {/* Auto-Recommended Trends — real-time Google Search grounding, no input needed */}
+      {/* Auto-Recommended Trends — real-time Google Search grounding, user-triggered only */}
       <div className="bg-gradient-to-br from-[#1a1530] to-[#18152b] border border-emerald-800/40 p-5 rounded-2xl space-y-4 shadow-lg">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center space-x-2">
@@ -144,19 +142,35 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
             </span>
             <h3 className="text-sm font-bold text-white">🔥 지금 가장 핫한 카테고리 (실시간 Google 검색 기반)</h3>
           </div>
-          <div className="flex items-center space-x-2 text-[11px] text-slate-400">
-            {autoGroundedAt && <span>기준: {autoGroundedAt}</span>}
-            <button
-              onClick={fetchAutoRecommend}
-              disabled={isAutoLoading}
-              className="bg-[#211b3d] hover:bg-[#2b244d] text-emerald-300 border border-emerald-800/50 px-2.5 py-1 rounded-lg font-medium transition disabled:opacity-50"
-            >
-              {isAutoLoading ? '조회 중...' : '↻ 새로고침'}
-            </button>
-          </div>
+          {hasRunAuto && (
+            <div className="flex items-center space-x-2 text-[11px] text-slate-400">
+              {autoGroundedAt && <span>기준: {autoGroundedAt}</span>}
+              <button
+                onClick={fetchAutoRecommend}
+                disabled={isAutoLoading}
+                className="bg-[#211b3d] hover:bg-[#2b244d] text-emerald-300 border border-emerald-800/50 px-2.5 py-1 rounded-lg font-medium transition disabled:opacity-50"
+              >
+                {isAutoLoading ? '조회 중...' : '↻ 새로고침'}
+              </button>
+            </div>
+          )}
         </div>
 
-        {isAutoLoading && autoTrends.length === 0 ? (
+        {!hasRunAuto ? (
+          <div className="flex flex-col items-center justify-center py-8 space-y-3 text-center">
+            <p className="text-xs text-slate-400 max-w-md">
+              버튼을 누르면 실시간 Google 검색으로 지금 화제인 쇼핑 카테고리를 조사합니다.
+              바로 시작하고 싶지 않다면 아래에서 카테고리/키워드를 직접 선택해 진행하세요.
+            </p>
+            <button
+              onClick={fetchAutoRecommend}
+              className="bg-emerald-700/80 hover:bg-emerald-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all flex items-center space-x-2 shadow-md"
+            >
+              <Flame className="w-4 h-4 text-amber-300 fill-amber-300" />
+              <span>실시간 트렌드 탐색 시작</span>
+            </button>
+          </div>
+        ) : isAutoLoading && autoTrends.length === 0 ? (
           <div className="flex items-center justify-center py-8 space-x-2 text-slate-400 text-xs">
             <div className="w-4 h-4 border-2 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin" />
             <span>실시간 검색으로 요즘 화제인 쇼핑 아이템을 조사하는 중...</span>
