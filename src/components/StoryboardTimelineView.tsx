@@ -49,6 +49,72 @@ export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
   const [isGeneratingStoryboard, setIsGeneratingStoryboard] = useState(false);
   const [storyboardError, setStoryboardError] = useState<string | null>(null);
 
+  // Bulk AI generation for every scene still missing media — the legitimate alternative to
+  // pulling source clips from third-party video sites: fills every empty scene via the fal.ai
+  // pipeline (Veo prompt + video gen) instead of just the single hook clip the per-scene
+  // buttons handle. Maintains its own `workingScenes` accumulator rather than reading the
+  // `scenes` prop mid-loop, since prop updates from onUpdateScenes() don't land synchronously
+  // between awaited iterations — reading `scenes` directly here would silently drop all but
+  // the last scene's update.
+  const [isBulkGenerating, setIsBulkGenerating] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+  const [bulkError, setBulkError] = useState<string | null>(null);
+
+  const handleGenerateAllScenes = async () => {
+    const targets = scenes.filter((s) => !s.media_url);
+    if (targets.length === 0) return;
+
+    setIsBulkGenerating(true);
+    setBulkError(null);
+    setBulkProgress({ current: 0, total: targets.length });
+    let workingScenes = [...scenes];
+
+    for (let i = 0; i < targets.length; i++) {
+      const scene = targets[i];
+      setBulkProgress({ current: i + 1, total: targets.length });
+      try {
+        let aiPrompt = scene.ai_prompt;
+        if (!aiPrompt) {
+          const promptRes = await apiFetch('/api/generate-ai-video-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ visualDescription: scene.required_visual, productName: scene.narration })
+          });
+          const promptData = await promptRes.json();
+          aiPrompt = promptData?.data?.veoPrompt || aiPrompt;
+        }
+
+        const videoRes = await fetch('/api/generate/video', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: aiPrompt || `Photorealistic 9:16 vertical commercial video clip: ${scene.required_visual}`,
+            duration: Math.round(scene.duration) || 5
+          })
+        });
+        const videoData = await videoRes.json();
+
+        workingScenes = workingScenes.map((s) =>
+          s.scene_id === scene.scene_id
+            ? {
+                ...s,
+                ai_prompt: aiPrompt || s.ai_prompt,
+                ...(videoData?.status === 'success' && videoData?.videoUrl
+                  ? { media_url: videoData.videoUrl, source_type: 'EXISTING' as const, transition: 'HARD_CUT' as const }
+                  : {})
+              }
+            : s
+        );
+        onUpdateScenes(workingScenes);
+      } catch (err) {
+        console.error('[Bulk Scene Generation Error]', scene.scene_id, err);
+        setBulkError(`${scene.scene_id} 장면 생성 중 오류가 발생했습니다. 나머지 장면은 계속 진행합니다.`);
+      }
+    }
+
+    setIsBulkGenerating(false);
+  };
+
   const activeScene = scenes.find((s) => s.scene_id === selectedSceneId) || scenes[0];
 
   // AI-generate the full scene breakdown from the selected script (Gemini scene-splitting)
@@ -289,6 +355,49 @@ export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>
+
+      {/* Bulk AI scene generation — fills every scene still missing media via fal.ai, instead
+          of requiring a click per scene. The legitimate replacement for third-party source clips. */}
+      {scenes.length > 0 && (
+        <div className="lg:col-span-12 bg-gradient-to-br from-[#1a1530] to-[#18152b] border border-purple-800/40 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center space-x-2.5">
+            <div className="bg-purple-900/60 border border-purple-700/50 p-2 rounded-lg shrink-0">
+              <Video className="w-4 h-4 text-purple-300" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-white">🎬 미디어 없는 장면 전체를 AI 영상으로 채우기</h3>
+              <p className="text-[11px] text-slate-400">
+                {scenes.filter((s) => !s.media_url).length === 0
+                  ? '모든 장면에 이미 미디어가 배치되어 있습니다.'
+                  : `${scenes.filter((s) => !s.media_url).length}개 장면이 비어있습니다. 장면당 최대 몇 분씩 걸릴 수 있습니다.`}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleGenerateAllScenes}
+            disabled={isBulkGenerating || scenes.filter((s) => !s.media_url).length === 0}
+            className="w-full md:w-auto bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-xs px-4 py-2.5 rounded-xl font-bold shadow-md flex items-center justify-center space-x-2 transition disabled:opacity-50 min-h-[40px] shrink-0"
+          >
+            {isBulkGenerating ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>{bulkProgress.current}/{bulkProgress.total} 장면 생성 중...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>AI로 전체 장면 한번에 생성</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {bulkError && (
+        <div className="lg:col-span-12 bg-rose-950/50 border border-rose-800/60 text-rose-200 text-xs rounded-xl p-3">
+          ⚠️ {bulkError}
+        </div>
+      )}
 
       {scenes.length === 0 && (
         <div className="lg:col-span-12 bg-[#181628] border border-purple-500/40 rounded-2xl p-6 text-center space-y-3">

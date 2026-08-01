@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ProjectData, SceneItem } from '../types';
 import { generateSrtSubtitles, downloadFile, downloadProjectManifest } from '../utils/exportUtils';
+import { apiFetch } from '../utils/apiClient';
 import {
   Play,
   Pause,
@@ -45,6 +46,49 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
 
   const [activePlatform, setActivePlatform] = useState<'shorts' | 'tiktok' | 'reels' | 'naver'>('shorts');
   const [copiedPlatform, setCopiedPlatform] = useState<string | null>(null);
+
+  // Real AI-generated SEO metadata (title/description/tags/pinned comment per platform) —
+  // user-triggered only (same reasoning as the trend auto-recommend fix: don't fire a Gemini
+  // call the user didn't ask for). Falls back to the static getPlatformMetadata() below until
+  // generated, so nothing regresses if the user never clicks the button.
+  const [aiSeoMetadata, setAiSeoMetadata] = useState<any>(null);
+  const [isLoadingSeo, setIsLoadingSeo] = useState(false);
+  const [seoError, setSeoError] = useState<string | null>(null);
+
+  const handleGenerateSeoMetadata = async () => {
+    setIsLoadingSeo(true);
+    setSeoError(null);
+    try {
+      const scriptText = project.scripts.find((s) => s.id === project.selectedScriptId)?.full_text || '';
+      const res = await apiFetch('/api/seo/generate-metadata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productName: project.productInfo?.product_name || '추천 상품',
+          scriptText,
+          partnersUrl: project.productInfo?.source_url || ''
+        })
+      });
+      const json = await res.json();
+      if (json?.status === 'success' && json?.data) {
+        setAiSeoMetadata(json.data);
+      } else {
+        setSeoError(json?.message || 'SEO 메타데이터 생성에 실패했습니다.');
+      }
+    } catch (err) {
+      setSeoError('SEO 메타데이터 요청이 실패했습니다.');
+    } finally {
+      setIsLoadingSeo(false);
+    }
+  };
+
+  // Maps this component's platform tab ids to the server response's platform keys
+  const AI_PLATFORM_KEY: Record<'shorts' | 'tiktok' | 'reels' | 'naver', string> = {
+    shorts: 'youtube_shorts',
+    tiktok: 'tiktok',
+    reels: 'instagram_reels',
+    naver: 'naver_clip'
+  };
 
   // Thumbnail A/B Copy selection
   const [selectedTitleOption, setSelectedTitleOption] = useState<'A' | 'B'>('A');
@@ -191,7 +235,22 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
     }
   };
 
-  const currentMeta = getPlatformMetadata();
+  // Prefer real AI-generated metadata for the active platform once generated; otherwise
+  // fall back to the static local templates so the section never shows empty content.
+  const getAiMetaForPlatform = () => {
+    if (!aiSeoMetadata) return null;
+    const raw = aiSeoMetadata[AI_PLATFORM_KEY[activePlatform]];
+    if (!raw) return null;
+    const hashtagsArr: string[] = raw.hashtags || raw.tags || [];
+    return {
+      title: raw.title || '',
+      description: raw.description || raw.caption || '',
+      hashtags: hashtagsArr.map((h: string) => (h.startsWith('#') ? h : `#${h}`)).join(' '),
+      pinned_comment: raw.pinned_comment as string | undefined
+    };
+  };
+  const aiMeta = getAiMetaForPlatform();
+  const currentMeta = aiMeta || getPlatformMetadata();
 
   const handleCopyMeta = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -569,10 +628,33 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
 
             {/* Platform Auto-Formatter & One-Click Copy */}
             <div className="space-y-3 bg-[#121020] border border-[#272342] p-4 rounded-xl">
-              <div className="flex items-center justify-between border-b border-[#272342] pb-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#272342] pb-2">
                 <span className="text-xs font-bold text-purple-300">플랫폼 맞춤 카피 생성기</span>
                 <span className="text-[10px] text-slate-400">쇼츠 / 틱톡 / 릴스 / 네이버클립</span>
               </div>
+
+              {/* AI-generated metadata trigger — user-triggered, not auto-fired */}
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-[#18152b] border border-purple-800/40 p-2.5 rounded-xl">
+                <span className="text-[11px] text-slate-400 leading-snug">
+                  {aiSeoMetadata
+                    ? '✅ AI가 최신 플랫폼 정책 기준으로 생성한 문구를 보고 있습니다.'
+                    : '아래는 기본 템플릿입니다. AI로 플랫폼별 최신 SEO 문구를 생성할 수 있습니다.'}
+                </span>
+                <button
+                  onClick={handleGenerateSeoMetadata}
+                  disabled={isLoadingSeo}
+                  className="bg-purple-700/80 hover:bg-purple-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 disabled:opacity-50 shrink-0"
+                >
+                  {isLoadingSeo ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  <span>{isLoadingSeo ? '생성 중...' : aiSeoMetadata ? '다시 생성' : 'AI로 SEO 문구 생성'}</span>
+                </button>
+              </div>
+
+              {seoError && (
+                <div className="text-[11px] text-rose-300 bg-rose-950/40 border border-rose-800/50 rounded-lg p-2">
+                  ⚠️ {seoError}
+                </div>
+              )}
 
               {/* Platform Selector Tabs */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
@@ -645,6 +727,24 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
                     {currentMeta.hashtags}
                   </p>
                 </div>
+
+                {aiMeta?.pinned_comment && (
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-slate-400 font-bold">고정 댓글 (Pinned Comment)</span>
+                      <button
+                        onClick={() => handleCopyMeta(aiMeta.pinned_comment!, '고정댓글')}
+                        className="text-[10px] bg-[#29224d] hover:bg-[#382f69] text-purple-200 px-2 py-0.5 rounded border border-purple-700/40 flex items-center space-x-1"
+                      >
+                        {copiedPlatform === '고정댓글' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedPlatform === '고정댓글' ? '복사됨' : '복사'}</span>
+                      </button>
+                    </div>
+                    <p className="bg-[#0f0d1c] p-2 rounded text-emerald-300 font-mono whitespace-pre-line border border-[#272147]">
+                      {aiMeta.pinned_comment}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {onNextStep && focusSection === 'metadata' && (

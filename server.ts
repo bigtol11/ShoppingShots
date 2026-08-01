@@ -487,6 +487,47 @@ app.post('/api/gemini-pipeline-v2', async (req, res) => {
   }
 });
 
+// Shared response schema for product-facts analysis — used by both the text-based
+// /api/analyze-product and the image-based /api/analyze-product-screenshot, so the
+// two stay structurally identical for the frontend to consume interchangeably.
+const PRODUCT_ANALYSIS_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    product_name: { type: Type.STRING },
+    price: { type: Type.STRING },
+    category_name: { type: Type.STRING },
+    verified_facts: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          claim_id: { type: Type.STRING },
+          claim: { type: Type.STRING },
+          status: { type: Type.STRING },
+          source: { type: Type.STRING },
+          safe_wording: { type: Type.STRING }
+        },
+        required: ['claim', 'safe_wording']
+      }
+    },
+    category_facts: { type: Type.ARRAY, items: { type: Type.STRING } },
+    use_cases: { type: Type.ARRAY, items: { type: Type.STRING } },
+    visual_features: { type: Type.ARRAY, items: { type: Type.STRING } },
+    prohibited_claims: { type: Type.ARRAY, items: { type: Type.STRING } },
+    search_terms: {
+      type: Type.OBJECT,
+      properties: {
+        ko: { type: Type.ARRAY, items: { type: Type.STRING } },
+        zh: { type: Type.ARRAY, items: { type: Type.STRING } },
+        en: { type: Type.ARRAY, items: { type: Type.STRING } }
+      },
+      required: ['ko', 'zh', 'en']
+    },
+    review_summary_points: { type: Type.ARRAY, items: { type: Type.STRING } }
+  },
+  required: ['verified_facts', 'category_facts', 'use_cases', 'search_terms']
+};
+
 app.post('/api/analyze-product', async (req, res) => {
   try {
     const { productName, productUrl, productJson, rawText } = req.body;
@@ -525,41 +566,7 @@ ${productJson ? JSON.stringify(productJson) : ''}
       config: {
         systemInstruction: GEMINI_SYSTEM_INSTRUCTION_V2_1,
         responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            category_name: { type: Type.STRING },
-            verified_facts: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  claim_id: { type: Type.STRING },
-                  claim: { type: Type.STRING },
-                  status: { type: Type.STRING },
-                  source: { type: Type.STRING },
-                  safe_wording: { type: Type.STRING }
-                },
-                required: ['claim', 'safe_wording']
-              }
-            },
-            category_facts: { type: Type.ARRAY, items: { type: Type.STRING } },
-            use_cases: { type: Type.ARRAY, items: { type: Type.STRING } },
-            visual_features: { type: Type.ARRAY, items: { type: Type.STRING } },
-            prohibited_claims: { type: Type.ARRAY, items: { type: Type.STRING } },
-            search_terms: {
-              type: Type.OBJECT,
-              properties: {
-                ko: { type: Type.ARRAY, items: { type: Type.STRING } },
-                zh: { type: Type.ARRAY, items: { type: Type.STRING } },
-                en: { type: Type.ARRAY, items: { type: Type.STRING } }
-              },
-              required: ['ko', 'zh', 'en']
-            },
-            review_summary_points: { type: Type.ARRAY, items: { type: Type.STRING } }
-          },
-          required: ['verified_facts', 'category_facts', 'use_cases', 'search_terms']
-        }
+        responseSchema: PRODUCT_ANALYSIS_SCHEMA
       }
     });
 
@@ -592,6 +599,68 @@ ${productJson ? JSON.stringify(productJson) : ''}
         review_summary_points: ['사용 편의성이 훌륭함', '디자인과 가격 대비 가성비가 만족스러움']
       }
     });
+  }
+});
+
+// Product analysis from screenshots (Gemini Vision) — lets the user upload photos of the
+// product page / review page instead of manually typing product_name/price/specs. Unlike
+// /api/analyze-product's error fallback, this fails loudly on error since a wrong silent
+// fallback here would mean the user ships a video with the wrong product name/price.
+app.post('/api/analyze-product-screenshot', async (req, res) => {
+  try {
+    const { images, productUrl } = req.body as { images?: { base64: string; mimeType: string }[]; productUrl?: string };
+
+    if (!Array.isArray(images) || images.length === 0) {
+      return res.status(400).json({ status: 'error', message: '분석할 스크린샷이 없습니다. 상품 페이지 캡처 이미지를 최소 1장 업로드해 주세요.' });
+    }
+
+    const ai = getGeminiClient(getUserGeminiKey(req));
+
+    const imageParts = images.map((img) => ({
+      inlineData: {
+        mimeType: img.mimeType || 'image/png',
+        data: img.base64.includes(',') ? img.base64.split(',')[1] : img.base64
+      }
+    }));
+
+    const instructionText = `
+첨부된 이미지는 쇼핑몰 상품 페이지 및/또는 구매 후기 페이지의 스크린샷입니다. 이미지를 읽어서
+실제로 화면에 보이는 정보만 사용해 상품 데이터를 추출하세요. 화면에 없는 내용은 절대 지어내지
+말고, 확인 안 되는 항목은 비워두거나 "확인불가"로 표기하세요.
+
+${productUrl ? `[참고 - 사용자가 입력한 쿠팡 파트너스 URL]: ${productUrl}` : ''}
+
+반드시 JSON 형태로 응답하세요.
+- product_name: 이미지에서 확인된 정확한 상품명
+- price: 이미지에서 확인된 가격 (없으면 빈 문자열)
+- category_name: 상품 카테고리
+- verified_facts: 이미지에서 실제 확인 가능한 사실 (claim, source="스크린샷 확인", safe_wording)
+- category_facts: 일반적인 제품군 정보
+- use_cases: 활용 상황 (3개 이상)
+- visual_features: 시각적으로 보여주기 좋은 포인트 (3개 이상)
+- prohibited_claims: 과장광고 위험 금지 표현 (2개 이상)
+- search_terms: 한국어(ko), 중국어(zh), 영어(en) 검색어 목록
+- review_summary_points: 이미지에 후기 페이지가 포함되어 있다면 주요 후기 요약 포인트 (없으면 빈 배열)
+`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: [{ role: 'user', parts: [...imageParts, { text: instructionText }] }],
+      config: {
+        systemInstruction: GEMINI_SYSTEM_INSTRUCTION_V2_1,
+        responseMimeType: 'application/json',
+        responseSchema: PRODUCT_ANALYSIS_SCHEMA
+      }
+    });
+
+    const parsed = JSON.parse(response.text || '{}');
+    if (!parsed.product_name) {
+      return res.status(422).json({ status: 'error', message: '스크린샷에서 상품명을 확인하지 못했습니다. 상품명이 잘 보이는 화면으로 다시 캡처해서 업로드해 주세요.' });
+    }
+    res.json({ status: 'success', data: parsed });
+  } catch (err: any) {
+    console.error('[Analyze Product Screenshot Error]', err);
+    res.status(500).json({ status: 'error', message: '스크린샷 분석에 실패했습니다. 다시 시도하거나 URL/JSON 직접 입력을 이용해 주세요.' });
   }
 });
 

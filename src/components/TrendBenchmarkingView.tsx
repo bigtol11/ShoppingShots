@@ -191,6 +191,17 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
                 </span>
                 <p className="text-xs font-bold text-white leading-snug line-clamp-2">{t.title}</p>
                 <p className="text-[11px] text-slate-400 line-clamp-2">{t.viral_points?.[0]}</p>
+                {t.benchmark_url && (
+                  <a
+                    href={t.benchmark_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-emerald-400 hover:text-emerald-300 text-[10px] font-medium flex items-center space-x-1"
+                  >
+                    <span>벤치마킹 샘플 보기</span>
+                    <ExternalLink className="w-2.5 h-2.5" />
+                  </a>
+                )}
                 <button
                   onClick={() => onSelectTopic(t.title, t.recommended_keywords)}
                   className="w-full bg-emerald-700/80 hover:bg-emerald-600 text-white font-bold text-[11px] py-2 rounded-lg transition-all flex items-center justify-center space-x-1"

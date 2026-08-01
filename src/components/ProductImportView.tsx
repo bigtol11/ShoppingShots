@@ -15,7 +15,10 @@ import {
   ShieldCheck,
   Zap,
   ChevronRight,
-  X
+  X,
+  Camera,
+  Upload,
+  Trash2
 } from 'lucide-react';
 
 interface ProductImportViewProps {
@@ -35,10 +38,83 @@ export const ProductImportView: React.FC<ProductImportViewProps> = ({
 }) => {
   const [urlInput, setUrlInput] = useState(productInfo.source_url || '');
   const [jsonInput, setJsonInput] = useState(JSON.stringify(productInfo, null, 2));
-  const [activeTab, setActiveTab] = useState<'url' | 'json' | 'presets'>('url');
+  const [activeTab, setActiveTab] = useState<'url' | 'json' | 'presets' | 'screenshot'>('url');
   const [isLoading, setIsLoading] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Screenshot -> Gemini Vision auto-fill (product page + review page captures)
+  const [screenshotFiles, setScreenshotFiles] = useState<{ id: string; base64: string; mimeType: string; name: string }[]>([]);
+  const [isAnalyzingScreenshot, setIsAnalyzingScreenshot] = useState(false);
+
+  const handleScreenshotSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+    setErrorMessage(null);
+    const read = (file: File): Promise<{ id: string; base64: string; mimeType: string; name: string }> =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, base64: reader.result as string, mimeType: file.type, name: file.name });
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    const newFiles = await Promise.all(files.map(read));
+    setScreenshotFiles((prev) => [...prev, ...newFiles]);
+    event.target.value = '';
+  };
+
+  const handleRemoveScreenshot = (id: string) => {
+    setScreenshotFiles((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  const handleAnalyzeScreenshots = async () => {
+    if (screenshotFiles.length === 0) {
+      setErrorMessage('먼저 상품 페이지(또는 후기 페이지) 스크린샷을 최소 1장 업로드해 주세요.');
+      return;
+    }
+    setIsAnalyzingScreenshot(true);
+    setErrorMessage(null);
+    setImportStatus('Gemini Vision이 스크린샷을 읽는 중...');
+    try {
+      const res = await apiFetch('/api/analyze-product-screenshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          images: screenshotFiles.map((f) => ({ base64: f.base64, mimeType: f.mimeType })),
+          productUrl: urlInput
+        })
+      });
+      const data = await res.json();
+      if (data?.status === 'error') {
+        setErrorMessage(data.message || '스크린샷 분석에 실패했습니다.');
+        setImportStatus(null);
+        return;
+      }
+      if (data?.data) {
+        const facts = data.data;
+        onUpdateProductInfo({
+          ...productInfo,
+          product_name: facts.product_name || productInfo.product_name,
+          price: facts.price || productInfo.price,
+          source_url: urlInput || productInfo.source_url,
+          category_name: facts.category_name || productInfo.category_name,
+          verified_facts: facts.verified_facts || productInfo.verified_facts,
+          category_facts: facts.category_facts || productInfo.category_facts,
+          use_cases: facts.use_cases || productInfo.use_cases,
+          visual_features: facts.visual_features || productInfo.visual_features,
+          prohibited_claims: facts.prohibited_claims || productInfo.prohibited_claims,
+          search_terms: facts.search_terms || productInfo.search_terms
+        });
+        setImportStatus(`'${(facts.product_name || '').slice(0, 20)}...' 스크린샷 자동 인식 완료!`);
+      }
+    } catch (err) {
+      console.error(err);
+      setErrorMessage('스크린샷 분석 요청이 실패했습니다.');
+      setImportStatus(null);
+    } finally {
+      setIsAnalyzingScreenshot(false);
+    }
+  };
 
   // Sync urlInput and jsonInput whenever productInfo changes (e.g. from Tab 1 topic selection)
   useEffect(() => {
@@ -187,6 +263,15 @@ export const ProductImportView: React.FC<ProductImportViewProps> = ({
                   <span>상품 JSON</span>
                 </button>
                 <button
+                  onClick={() => { setActiveTab('screenshot'); setErrorMessage(null); }}
+                  className={`flex-1 text-xs py-2 font-medium rounded-md flex items-center justify-center space-x-1.5 transition ${
+                    activeTab === 'screenshot' ? 'bg-[#2b254d] text-purple-300 shadow font-bold' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>스크린샷 업로드</span>
+                </button>
+                <button
                   onClick={() => { setActiveTab('presets'); setErrorMessage(null); }}
                   className={`flex-1 text-xs py-2 font-medium rounded-md flex items-center justify-center space-x-1.5 transition ${
                     activeTab === 'presets' ? 'bg-[#2b254d] text-purple-300 shadow font-bold' : 'text-slate-400 hover:text-white'
@@ -274,6 +359,57 @@ export const ProductImportView: React.FC<ProductImportViewProps> = ({
                     {isLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                     <span>JSON 데이터 적용 및 분석</span>
                   </button>
+                </div>
+              )}
+
+              {/* Screenshot Upload Tab — Gemini Vision reads product page / review page captures */}
+              {activeTab === 'screenshot' && (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <label className="text-xs font-medium text-slate-300">
+                      상품 페이지 / 후기 페이지 스크린샷
+                    </label>
+                    <span className="text-[10px] text-slate-500 font-mono">Gemini Vision Auto-Fill</span>
+                  </div>
+
+                  <label className="w-full cursor-pointer bg-[#110f1e] hover:bg-[#181433] border border-dashed border-[#3b3363] rounded-lg py-6 flex flex-col items-center justify-center space-y-1.5 transition">
+                    <Upload className="w-5 h-5 text-purple-400" />
+                    <span className="text-xs text-purple-200 font-medium">스크린샷 이미지 선택 (여러 장 가능)</span>
+                    <span className="text-[10px] text-slate-500">상품명/가격이 보이는 화면 + 후기 화면을 함께 올리면 더 정확합니다</span>
+                    <input type="file" accept="image/*" multiple onChange={handleScreenshotSelect} className="hidden" />
+                  </label>
+
+                  {screenshotFiles.length > 0 && (
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                      {screenshotFiles.map((f) => (
+                        <div key={f.id} className="relative group rounded-lg overflow-hidden border border-[#2d2948] aspect-square bg-black">
+                          <img src={f.base64} alt={f.name} className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveScreenshot(f.id)}
+                            className="absolute top-1 right-1 bg-black/70 hover:bg-rose-900/80 text-white p-1 rounded-md transition"
+                            title="제거"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleAnalyzeScreenshots}
+                    disabled={isAnalyzingScreenshot || screenshotFiles.length === 0}
+                    className="w-full bg-purple-600 hover:bg-purple-500 text-white text-xs py-2.5 rounded-lg font-semibold transition flex items-center justify-center space-x-2 shadow-md shadow-purple-900/30 disabled:opacity-50"
+                  >
+                    {isAnalyzingScreenshot ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+                    <span>{isAnalyzingScreenshot ? 'AI가 스크린샷 읽는 중...' : 'AI로 스크린샷 분석 & 자동 입력'}</span>
+                  </button>
+
+                  <p className="text-[11px] text-slate-500 leading-relaxed pt-1">
+                    * 쿠팡 파트너스 URL은 위 <strong className="text-purple-300 font-normal">URL 가져오기</strong> 탭에 그대로 입력해 두시면
+                    스크린샷 분석 결과와 함께 저장됩니다 (링크 발급 자체는 쿠팡 파트너스 사이트에서 직접 진행하셔야 합니다).
+                  </p>
                 </div>
               )}
 
