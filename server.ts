@@ -131,6 +131,7 @@ app.post('/api/auth/google', async (req, res) => {
     try {
       decoded = await getAuth().verifyIdToken(idToken);
     } catch (err: any) {
+      console.error('[Google Sign-In Verify Error]', err?.code, err?.message);
       return res.status(401).json({ status: 'error', message: 'Google 로그인 인증에 실패했습니다.' });
     }
 
