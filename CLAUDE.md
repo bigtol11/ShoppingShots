@@ -44,6 +44,16 @@ Stack: React 19 + Vite + Express (`server.ts`, single file, ~2400 lines) +
 Google Gemini (`@google/genai`) + fal.ai (AI video gen) + FFmpeg (server-side
 video assembly) + Firebase Admin (Firestore + Cloud Storage, optional/dual-mode).
 
+## ⚠️ Deploy batching — don't deploy without being told
+
+Build, fix, and commit freely at any time. But **do not run `gcloud run deploy`
+until the user explicitly says to** — they batch up several fixes and deploy
+them together, and don't want a `gcloud run deploy` (which takes several
+minutes) firing after every small change while they're mid-conversation about
+something else. Keep committing to git as you go (that's fine and expected),
+just hold the actual Cloud Run deploy until asked. When they do say to deploy,
+remember to bump the version first (see above).
+
 ## Live deployment
 
 **https://shoppingshots-823154324409.us-west1.run.app**
@@ -52,8 +62,15 @@ video assembly) + Firebase Admin (Firestore + Cloud Storage, optional/dual-mode)
 - Cloud Run service name: `shoppingshots`.
 - Deploy with: `gcloud run deploy shoppingshots --source . --region us-west1 --configuration=shoppingshots ...` — see `DEPLOY.md` for the full command and required env vars/secrets.
 - **gcloud configuration**: this machine has a `shoppingshots` gcloud configuration (account `bigtol11@gmail.com`, project `shoppingshots-prod`) kept deliberately separate from the `default` configuration (which points at ShortDramaProject's `gen-lang-client-0622256162`). **Always pass `--configuration=shoppingshots` on every gcloud command for this project.** gcloud's binary may not be on PATH for already-open shells after install — invoke via `C:\Users\ADMIN\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd` or prepend it to `$env:Path` per session.
-- Invite code for signup on the live site: `shopping2026`.
+- **Sign-in is Google-only** (Firebase Authentication, not the old email/password+invite-code system — that was fully removed). Access is gated by `ALLOWED_EMAILS` (comma-separated, server env var) — currently just `bigtol11@gmail.com`. Admin-only endpoints (fal.ai key mgmt, stats) are gated separately by `ADMIN_EMAILS`, checked against the same login session (no separate admin password).
 - Firebase project `shoppingshots-prod`: Firestore + Cloud Storage enabled, service account key at `E:\ShoppingShots\service-account.json` (gitignored, never committed, never baked into the Docker image — see DEPLOY.md for why and how it's mounted via Secret Manager instead).
+- Client-side Firebase web config (`src/firebaseConfig.ts`) is fetched via the Firebase Management API and committed — this is NOT secret, safe to have in the repo.
+
+### Not yet deployed (committed to git, sitting in v1.0.3, waiting for the user to say "deploy")
+- Per-user Gemini API key (BYOK) — Settings has a Gemini key field now; falls back to the server's shared key if unset.
+- fal.ai key — user provided a real key in chat (`e695724a-c909-4b7e-8f2e-5f8239d7dfb3:c3a8c1df7f07d2af0f1ef19b9b2495a7`) but it was never added to a deploy's `--set-env-vars FAL_KEY=...`. **The admin-panel "저장" button for fal.ai key only sets it in server memory (`serverFalKey`), which does NOT survive an instance restart/redeploy on Cloud Run** — better to just pass `FAL_KEY=` directly as a deploy-time env var like `GEMINI_API_KEY`, not rely on the admin panel for persistence.
+- `ADMIN_EMAILS=bigtol11@gmail.com` needs to be added to the deploy command too (admin auth was reworked from a broken `ADMIN_SECRET` flow to reusing the login session).
+- User said (2026-08-01) they want to revisit/reorganize the whole API-key setup again later before deploying — treat this as an open design conversation, not a settled plan, next time it comes up.
 
 ## Architecture
 
@@ -216,28 +233,108 @@ requests (register, login, project save/list, file upload) directly against
 `https://shoppingshots-823154324409.us-west1.run.app`, then cleaned up all
 test accounts/files from the live Firestore/Storage project.
 
-User ended the session here ("지금은 여기까지 하겠습니다").
+### 2026-08-01 (continued same day) — Google Sign-In, mobile UX, real Typecast, search-grounded trends, Gemini BYOK
+
+User resumed and immediately flagged the invite-code email/password login as
+wrong UX ("메인 페이지가 바로 로그인 창으로 나오면 안 됩니다") — wanted the
+main page visible with a top-right login button, and login done via each
+person's own Google account. **Fully replaced the custom bcrypt+JWT+invite-code
+system with Firebase Authentication Google Sign-In** (see `src/firebaseConfig.ts`,
+`src/utils/firebaseAuth.ts`, `/api/auth/google` in server.ts verifying the ID
+token via `admin.auth().verifyIdToken()`), gated by `ALLOWED_EMAILS`. Fetched
+the Firebase web app config via direct Management API calls (`gcloud auth
+print-access-token` + REST) instead of making the user click through Firebase
+Console — had to add `X-Goog-User-Project` header to work around a "no quota
+project" 403. User caught a real deploy bug from a pasted ShortDramaProject
+screenshot showing a version badge — added the same pattern here
+(`__APP_VERSION__` from package.json, see the versioning section above).
+
+**Mobile-first nav redesign**: replaced the cramped bottom tab bar with a
+hamburger + slide-out drawer (`Sidebar.tsx` now serves both the desktop static
+rail and the mobile drawer from shared content), fixed several fixed-pixel-width
+elements that risked overflow on narrow phones.
+
+**Rebranded** "Lucy AI Studio" → "ShoppingShots" everywhere (title, PWA
+manifest, AI system-prompt identity string, server logs) — user wanted the
+name to match the already-unified GitHub/Cloud Run/Firebase naming.
+
+**Real Typecast integration** (user reported "키 인증 실패 HTTP 404"): the
+inherited AI-Studio code called a hallucinated endpoint (`/v1/actors`) that
+doesn't exist. Root-caused by testing directly against the real API with the
+user's actual key via curl — found the true endpoints (`GET /v1/voices` or
+`/v2/voices`, `POST /v1/text-to-speech`, header `X-API-KEY`, no Bearer prefix)
+and confirmed all the way through to real synthesized WAV audio. Fixed
+`/api/settings/validate-key`, `/api/tts/typecast/actors`, `/api/tts/preview`,
+and `/api/generate-tts`, and fixed the render pipeline's narration decoding
+(`AudioConfig.narrationAudioFormat`) since Typecast returns a real WAV
+container while Gemini returns headerless raw PCM — they need different
+ffmpeg input handling and were previously conflated.
+
+**Trend recommendations switched to real Google Search grounding**: user
+asked directly whether Gemini could do real-time search instead of pure
+generation — yes, via the `tools: [{ googleSearch: {} }]` config (not
+combinable with `responseMimeType: 'application/json'`, so responses are
+parsed out of plain text via a small `extractJson()` helper). Upgraded
+`/api/trends/analyze` and added a new `/api/trends/auto-recommend` that
+fires on page load with no input needed — both verified live to return
+genuinely current, specific results (e.g. real 2026 여름 폭염 product trends
+with real citations), and both fail honestly (no fabricated fallback data)
+if grounding/parsing fails.
+
+**Declined to build**: user shared a manual workflow + pasted AI advice about
+downloading Douyin/TikTok videos, stripping watermarks, and re-editing
+(flip/speed/cuts) specifically to evade platform duplicate-content detection,
+deliberately favoring foreign creators' content because enforcement is slower.
+Refused this specific piece as systematic copyright infringement with
+built-in detection evasion (not fair use, regardless of the "2차 가공"
+framing) — offered legitimate alternatives (AI-generated clips, the user's
+own product media, stock footage, official seller-provided assets) instead.
+This was a judgment call, not a settled policy — revisit only if the user
+pushes back with a materially different framing.
+
+**Per-user Gemini API key (BYOK)**: user asked to confirm the admin's Gemini/
+Typecast keys were the only ones in use, then asked for Gemini to become
+per-user like Typecast already was. Threaded a `userKey` param through
+`getGeminiClient()` at all ~11 call sites (reads `x-gemini-key` header or
+`geminiKey` body field via `getUserGeminiKey(req)`), added a matching
+`apiFetch()` client wrapper that auto-attaches the header from
+`localStorage`, wired it into every Gemini-backed frontend call, and added a
+Gemini key field to Settings. Falls back to the server's shared key when the
+user hasn't set their own — never hard-fails a fresh account.
+
+**Admin auth was actually broken**: user tried to save a real fal.ai key and
+hit "관리자 기능이 비활성화되어 있습니다" — the `ADMIN_SECRET` env var had
+simply never been set on any deploy. Rather than adding yet another secret to
+manage, reworked `requireAdmin` to check the already-authenticated session's
+email against `ADMIN_EMAILS` — no separate admin password at all now.
+
+**User then paused all API-key work** ("api키 관련은 다음에 다시 정리해야겠습니다
+... 기억해 놓고 계시고") — v1.0.3 (Gemini BYOK + admin auth fix) is committed
+to git but **deliberately not deployed**; the live site is still v1.0.2. User
+also gave a real fal.ai key in chat (see "Not yet deployed" list above) but
+asked to hold off deploying it too. **Do not deploy any of this until told to.**
 
 ## Next session — pick up here
 
-**Not yet done: a real end-to-end walkthrough of the deployed site as an
-actual user.** Everything has been verified piece-by-piece via curl (auth,
-storage, individual endpoints), but nobody has gone through the full product
-UI flow start to finish: sign up on https://shoppingshots-823154324409.us-west1.run.app
-with invite code `shopping2026` → import a real Coupang product → generate a
-script → generate a storyboard → generate TTS narration → render → confirm a
-real playable MP4 comes out the other end. **This is the first thing to do
-next session** (or to prompt the user to do, if this session resumes with the
-user rather than picking up autonomous work) — it's the one part of the
-rebuild that hasn't been exercised as a real user would.
+1. **Ask before doing anything else**: does the user want to resume the
+   API-key reorganization conversation, or just deploy what's already
+   committed (v1.0.3)? Don't assume — they explicitly deferred this.
+2. **Still not done**: a real end-to-end walkthrough of the deployed site as
+   an actual user (sign up → product → script → storyboard → audio →
+   render → real playable MP4). Has never been exercised as a real user
+   would, only piece-by-piece via curl.
+3. Once fal.ai is actually deployed, the AI video generation path in the
+   storyboard step should get a real live test too (it's only ever hit the
+   graceful no-key fallback so far).
 
-Secondary/lower-priority follow-ups, not blocking:
+Lower-priority, not blocking:
 - Local `npm run dev` still can't render (no ffmpeg on this dev machine) —
   fine since the deployed site works, but worth fixing locally too if the
   user wants to iterate on the render pipeline without redeploying every time.
 - `DEPLOY.md`'s "Cloud Run" section mentions Application Default Credentials
   as the more production-correct alternative to mounting `service-account.json`
   via Secret Manager — not implemented, deferred as noted in that file.
-- No email verification / password reset / OAuth on the auth system —
-  explicitly fine for now per the user ("나중에 상용화 시 다시 해도 되지 않나요?"),
-  revisit before opening this up beyond invite-only friends-and-family use.
+- No email verification / password reset on the Google Sign-In flow — fine
+  for invite-only friends-and-family use, revisit before wider launch.
+- fal.ai admin-panel "저장" button only persists the key in server memory,
+  not durably — see the "Not yet deployed" note above.
