@@ -837,6 +837,35 @@ function routeAiVideoModel(prompt: string, requestedModel?: string): {
   };
 }
 
+// fal.ai's queue.fal.run endpoints are ASYNC — the POST only returns a
+// {request_id, status_url, response_url} ticket, not the finished asset.
+// The real result only exists once status_url reports COMPLETED, at which
+// point response_url has the actual payload. Polls until done or timeout.
+async function pollFalQueueResult(statusUrl: string, responseUrl: string, activeKey: string, timeoutMs = 120000): Promise<any | null> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const statusRes = await fetch(statusUrl, { headers: { 'Authorization': `Key ${activeKey}` } });
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (statusData.status === 'COMPLETED') {
+          const resultRes = await fetch(responseUrl, { headers: { 'Authorization': `Key ${activeKey}` } });
+          return resultRes.ok ? await resultRes.json() : null;
+        }
+        if (statusData.status === 'ERROR' || statusData.status === 'FAILED') {
+          console.warn('[fal.ai Queue Error]', statusData);
+          return null;
+        }
+      }
+    } catch (err) {
+      console.warn('[fal.ai Queue Poll Warning]', err);
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  console.warn('[fal.ai Queue Timeout]', statusUrl);
+  return null;
+}
+
 // Step 1: Background Removal (누끼 추출 전처리)
 async function processFalRembg(imageUrl: string, activeKey?: string): Promise<string> {
   if (!activeKey || !imageUrl) return imageUrl;
@@ -850,8 +879,9 @@ async function processFalRembg(imageUrl: string, activeKey?: string): Promise<st
       body: JSON.stringify({ image_url: imageUrl })
     });
     if (res.ok) {
-      const data = await res.json();
-      return data.image?.url || data.output?.url || imageUrl;
+      const ticket = await res.json();
+      const data = await pollFalQueueResult(ticket.status_url, ticket.response_url, activeKey, 60000);
+      return data?.image?.url || data?.output?.url || imageUrl;
     }
   } catch (err) {
     console.warn('[I2V Step 1 Rembg Warning]', err);
@@ -877,8 +907,9 @@ async function processFalFluxCompositing(bgRemovedUrl: string, prompt: string, a
       })
     });
     if (res.ok) {
-      const data = await res.json();
-      return data.images?.[0]?.url || data.output?.url || bgRemovedUrl;
+      const ticket = await res.json();
+      const data = await pollFalQueueResult(ticket.status_url, ticket.response_url, activeKey, 60000);
+      return data?.images?.[0]?.url || data?.output?.url || bgRemovedUrl;
     }
   } catch (err) {
     console.warn('[I2V Step 2 Flux Compositing Warning]', err);
@@ -970,8 +1001,32 @@ app.post(['/api/generate/video', '/api/fal/generate-video', '/api/generate-ai-vi
         });
       }
 
-      const falData = await falResponse.json();
-      const videoUrl = falData.video?.url || falData.images?.[0]?.url || falData.output?.url || '/sample_shorts_1080x1920.mp4';
+      const ticket = await falResponse.json();
+      // Video generation takes much longer than image steps — allow up to 4 minutes.
+      const falData = await pollFalQueueResult(ticket.status_url, ticket.response_url, activeKey, 240000);
+      const videoUrl = falData?.video?.url || falData?.images?.[0]?.url || falData?.output?.url;
+
+      if (!videoUrl) {
+        console.error('[Video Engine Error] fal.ai queue did not return a completed video in time', ticket);
+        return res.json({
+          status: 'success',
+          videoUrl: '/sample_shorts_1080x1920.mp4',
+          selectedModel: routed.modelLabel,
+          endpointUsed: routed.modelEndpoint,
+          routingReason: routed.routingReason,
+          pipelineMode: referenceImage ? 'I2V (3-Step: Rembg -> Flux Composite -> Video Anchor)' : 'T2V (Text-to-Video)',
+          requestId: ticket.request_id || `req_${Date.now()}`,
+          metadata: {
+            model: routed.modelLabel,
+            endpoint: routed.modelEndpoint,
+            prompt: motionPrompt,
+            referenceImage,
+            finalCompositedImageUrl,
+            generatedAt: new Date().toISOString(),
+            isFallback: true
+          }
+        });
+      }
 
       return res.json({
         status: 'success',
@@ -980,7 +1035,7 @@ app.post(['/api/generate/video', '/api/fal/generate-video', '/api/generate-ai-vi
         endpointUsed: routed.modelEndpoint,
         routingReason: routed.routingReason,
         pipelineMode: referenceImage ? 'I2V (3-Step: Rembg -> Flux Composite -> Video Anchor)' : 'T2V (Text-to-Video)',
-        requestId: falData.request_id || `req_${Date.now()}`,
+        requestId: ticket.request_id || `req_${Date.now()}`,
         metadata: {
           model: routed.modelLabel,
           endpoint: routed.modelEndpoint,

@@ -62,6 +62,7 @@ gcloud run deploy shoppingshots \
   --region us-west1 \
   --allow-unauthenticated \
   --max-instances=1 \
+  --timeout=540 \
   --set-env-vars "GEMINI_API_KEY=<값>,JWT_SECRET=<값>,ALLOWED_EMAILS=<이메일1,이메일2>,FIREBASE_SERVICE_ACCOUNT_PATH=/secrets/service-account.json" \
   --set-secrets="/secrets/service-account.json=shoppingshots-service-account:latest" \
   --configuration=shoppingshots
@@ -72,6 +73,10 @@ gcloud run deploy shoppingshots \
 인스턴스 메모리에만 있어서, 인스턴스가 2개 이상 뜨면 상태 조회 요청이 다른
 인스턴스로 가서 404가 날 수 있습니다. `--min-instances`는 굳이 안 정해도
 됩니다 (기본 0 — 트래픽 없을 때 비용 절감, 첫 요청만 콜드스타트로 조금 느림).
+`--timeout=540`(9분)은 `/api/generate/video`가 fal.ai의 큐 API를 폴링하는 동안
+(누끼 제거 최대 60초 + 배경 합성 최대 60초 + 영상 생성 최대 240초, 최악의 경우
+약 6분) HTTP 요청이 살아있어야 하기 때문에 Cloud Run 기본값(300초)보다 여유를
+둔 것 — fal.ai 실제 연동 전에는 없어도 무방하지만, 연동 시점부터는 필수입니다.
 
 ## 4. Google 로그인 설정 (API로는 불가능한 유일한 수동 단계)
 
