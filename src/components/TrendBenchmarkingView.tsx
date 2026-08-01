@@ -35,6 +35,41 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
   const [keyword, setKeyword] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
 
+  // Auto-recommended trends — fetched once on page load via real Google Search grounding,
+  // so the page isn't a blank form the user has to fill in before seeing anything.
+  const [autoTrends, setAutoTrends] = useState<TrendTopic[]>([]);
+  const [isAutoLoading, setIsAutoLoading] = useState<boolean>(false);
+  const [autoError, setAutoError] = useState<string | null>(null);
+  const [autoGroundedAt, setAutoGroundedAt] = useState<string | null>(null);
+
+  const fetchAutoRecommend = async () => {
+    setIsAutoLoading(true);
+    setAutoError(null);
+    try {
+      const res = await fetch('/api/trends/auto-recommend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const json = await res.json();
+      if (json.status === 'success' && Array.isArray(json.data)) {
+        setAutoTrends(json.data);
+        setAutoGroundedAt(json.groundedAt || null);
+      } else {
+        setAutoError(json.message || '실시간 추천을 가져오지 못했습니다.');
+      }
+    } catch (err) {
+      setAutoError('실시간 추천 요청이 실패했습니다.');
+    } finally {
+      setIsAutoLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAutoRecommend();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const categoryDropdownRef = useRef<HTMLDivElement>(null);
   const keywordInputRef = useRef<HTMLInputElement>(null);
 
@@ -96,6 +131,62 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
             카테고리와 키워드를 입력하면 조회수 100만 회 이상 폭발한 쇼핑쇼츠 주제, 후킹 패턴, 벤치마킹 소스를 자동 수집합니다.
           </p>
         </div>
+      </div>
+
+      {/* Auto-Recommended Trends — real-time Google Search grounding, no input needed */}
+      <div className="bg-gradient-to-br from-[#1a1530] to-[#18152b] border border-emerald-800/40 p-5 rounded-2xl space-y-4 shadow-lg">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center space-x-2">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            </span>
+            <h3 className="text-sm font-bold text-white">🔥 지금 가장 핫한 카테고리 (실시간 Google 검색 기반)</h3>
+          </div>
+          <div className="flex items-center space-x-2 text-[11px] text-slate-400">
+            {autoGroundedAt && <span>기준: {autoGroundedAt}</span>}
+            <button
+              onClick={fetchAutoRecommend}
+              disabled={isAutoLoading}
+              className="bg-[#211b3d] hover:bg-[#2b244d] text-emerald-300 border border-emerald-800/50 px-2.5 py-1 rounded-lg font-medium transition disabled:opacity-50"
+            >
+              {isAutoLoading ? '조회 중...' : '↻ 새로고침'}
+            </button>
+          </div>
+        </div>
+
+        {isAutoLoading && autoTrends.length === 0 ? (
+          <div className="flex items-center justify-center py-8 space-x-2 text-slate-400 text-xs">
+            <div className="w-4 h-4 border-2 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin" />
+            <span>실시간 검색으로 요즘 화제인 쇼핑 아이템을 조사하는 중...</span>
+          </div>
+        ) : autoError ? (
+          <div className="text-xs text-rose-300 bg-rose-950/40 border border-rose-800/50 rounded-xl p-3">
+            ⚠️ {autoError}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {autoTrends.map((t) => (
+              <div
+                key={t.id}
+                className="bg-[#120f23] border border-[#262045] hover:border-emerald-600/60 rounded-xl p-3.5 space-y-2 transition-all"
+              >
+                <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800/50 px-2 py-0.5 rounded-full font-bold">
+                  {t.platform}
+                </span>
+                <p className="text-xs font-bold text-white leading-snug line-clamp-2">{t.title}</p>
+                <p className="text-[11px] text-slate-400 line-clamp-2">{t.viral_points?.[0]}</p>
+                <button
+                  onClick={() => onSelectTopic(t.title, t.recommended_keywords)}
+                  className="w-full bg-emerald-700/80 hover:bg-emerald-600 text-white font-bold text-[11px] py-2 rounded-lg transition-all flex items-center justify-center space-x-1"
+                >
+                  <span>이 주제로 시작</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Input Controls */}

@@ -981,8 +981,8 @@ app.post('/api/settings/validate-key', async (req, res) => {
 
   try {
     if (provider === 'typecast') {
-      const r = await fetch('https://api.typecast.ai/v1/actors', {
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'x-api-key': apiKey }
+      const r = await fetch('https://api.typecast.ai/v1/voices', {
+        headers: { 'X-API-KEY': apiKey }
       });
       if (!r.ok) {
         return res.status(401).json({ status: 'error', message: `타입캐스트 API 키 인증에 실패했습니다. (HTTP ${r.status})` });
@@ -1012,7 +1012,7 @@ app.post('/api/settings/validate-key', async (req, res) => {
   res.status(400).json({ status: 'error', message: '지원되지 않는 API 제공자입니다.' });
 });
 
-// Dynamic Typecast Actors Endpoint with Real REST Fetch Adapter
+// Dynamic Typecast Voices Endpoint — real REST call to api.typecast.ai/v2/voices.
 app.get('/api/tts/typecast/actors', async (req, res) => {
   const typecastKey = (req.headers['x-typecast-key'] as string) || (req.query.apiKey as string) || '';
 
@@ -1024,113 +1024,64 @@ app.get('/api/tts/typecast/actors', async (req, res) => {
     });
   }
 
-  let actors: any[] = [];
-  let isRealFetchSuccess = false;
-
   try {
-    const fetchRes = await fetch('https://api.typecast.ai/v1/actors', {
-      headers: {
-        'Authorization': `Bearer ${typecastKey}`,
-        'x-api-key': typecastKey
-      }
+    const fetchRes = await fetch('https://api.typecast.ai/v2/voices', {
+      headers: { 'X-API-KEY': typecastKey }
     });
 
-    if (fetchRes.ok) {
-      const data = await fetchRes.json();
-      const rawList = data?.result || data?.actors || data?.data || (Array.isArray(data) ? data : []);
-      if (Array.isArray(rawList) && rawList.length > 0) {
-        actors = rawList.map((actor: any) => ({
-          id: actor.actor_id || actor.id || `tc_${actor.name}`,
-          name: `Typecast - ${actor.name || actor.title}`,
-          provider: 'typecast',
-          gender: actor.gender === 'female' ? '여성' : actor.gender === 'male' ? '남성' : '혼성',
-          style: actor.description || actor.style || 'Typecast AI Voice',
-          sample: actor.sample_url || actor.preview_url || '',
-          isCustomClone: Boolean(actor.is_custom || actor.custom_voice),
-          isUnlocked: true
-        }));
-        isRealFetchSuccess = true;
-      }
+    if (!fetchRes.ok) {
+      return res.json({
+        status: 'error',
+        message: `Typecast 성우 목록 조회 실패 (HTTP ${fetchRes.status})`,
+        actors: []
+      });
     }
-  } catch (err) {
-    console.warn('[Typecast REST API Fetch Attempt Warning]', err);
-  }
 
-  if (!isRealFetchSuccess || actors.length === 0) {
-    actors = [
-      {
-        id: 'tc_clone_01',
-        name: '타입캐스트 - 내 클론 보이스 1 (쇼핑전용)',
-        provider: 'typecast',
-        gender: '여성',
-        style: '사용자 고유 클론 보이스 - 완벽한 전달력',
-        sample: 'https://typecast.ai/sample1.mp3',
-        isCustomClone: true,
-        isUnlocked: true
-      },
-      {
-        id: 'tc_clone_02',
-        name: '타입캐스트 - 내 클론 보이스 2 (커머스)',
-        provider: 'typecast',
-        gender: '남성',
-        style: '사용자 고유 클론 보이스 - 가성비 리뷰 톤',
-        sample: 'https://typecast.ai/sample2.mp3',
-        isCustomClone: true,
-        isUnlocked: true
-      },
-      {
-        id: 'tc_haeun',
-        name: 'Typecast - 하은 (쇼핑엔터)',
-        provider: 'typecast',
-        gender: '여성',
-        style: '타입캐스트 인기 쇼핑엔터 전용 톤',
-        sample: 'https://typecast.ai/sample_haeun.mp3',
-        isCustomClone: false,
-        isUnlocked: true
-      },
-      {
-        id: 'tc_beomjin',
-        name: 'Typecast - 범진 (리뷰어)',
-        provider: 'typecast',
-        gender: '남성',
-        style: '직설적인 제품 리뷰어 톤',
-        sample: 'https://typecast.ai/sample_beomjin.mp3',
-        isCustomClone: false,
-        isUnlocked: true
-      },
-      {
-        id: 'tc_jia',
-        name: 'Typecast - AI 아나운서 지아',
-        provider: 'typecast',
-        gender: '여성',
-        style: '신뢰감을 주는 정보 전달 앵커 톤',
-        sample: 'https://typecast.ai/sample_jia.mp3',
-        isCustomClone: false,
-        isUnlocked: true
-      },
-      {
-        id: 'tc_dohyun',
-        name: 'Typecast - 캐스터 도현',
-        provider: 'typecast',
-        gender: '남성',
-        style: '스포티하고 에너제틱한 숏폼 톤',
-        sample: 'https://typecast.ai/sample_dohyun.mp3',
-        isCustomClone: false,
-        isUnlocked: true
-      }
-    ];
-  }
+    const rawList = await fetchRes.json();
+    const actors = (Array.isArray(rawList) ? rawList : []).map((v: any) => ({
+      id: v.voice_id,
+      name: v.voice_name,
+      provider: 'typecast',
+      gender: v.gender === 'female' ? '여성' : v.gender === 'male' ? '남성' : '혼성',
+      style: [v.age, ...(Array.isArray(v.use_cases) ? v.use_cases : [])].filter(Boolean).join(' · ') || 'Typecast AI Voice',
+      sample: '',
+      isCustomClone: v.voice_type === 'cloned' || v.voice_type === 'custom',
+      isUnlocked: true,
+      model: v.models?.[0]?.version || 'ssfm-v30'
+    }));
 
-  return res.json({
-    status: 'success',
-    message: isRealFetchSuccess
-      ? 'https://api.typecast.ai/v1/actors REST API 실시간 인증 및 성우 로드 완료'
-      : 'Typecast API 키 인증 성공 및 성우 카탈로그 로드 완료',
-    customCloneCount: actors.filter((a: any) => a.isCustomClone).length,
-    totalCount: actors.length,
-    actors
-  });
+    return res.json({
+      status: 'success',
+      message: `Typecast REST API 실시간 인증 및 성우 ${actors.length}개 로드 완료`,
+      customCloneCount: actors.filter((a: any) => a.isCustomClone).length,
+      totalCount: actors.length,
+      actors
+    });
+  } catch (err: any) {
+    console.warn('[Typecast REST API Fetch Error]', err.message);
+    return res.json({ status: 'error', message: 'Typecast 서버 연결에 실패했습니다.', actors: [] });
+  }
 });
+
+// Real Typecast TTS synthesis — returns audio as base64-encoded WAV.
+async function synthesizeTypecastAudio(text: string, voiceId: string, apiKey: string, model = 'ssfm-v30'): Promise<string | null> {
+  try {
+    const r = await fetch('https://api.typecast.ai/v1/text-to-speech', {
+      method: 'POST',
+      headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice_id: voiceId, text, model })
+    });
+    if (!r.ok) {
+      console.warn('[Typecast TTS Error]', r.status, await r.text().catch(() => ''));
+      return null;
+    }
+    const buffer = Buffer.from(await r.arrayBuffer());
+    return buffer.toString('base64');
+  } catch (err: any) {
+    console.warn('[Typecast TTS Network Error]', err.message);
+    return null;
+  }
+}
 
 // Dynamic ElevenLabs Voices Endpoint
 app.get('/api/tts/elevenlabs/voices', async (req, res) => {
@@ -1306,36 +1257,28 @@ app.post('/api/tts/preview', async (req, res) => {
       });
     }
 
-    if (voiceProvider === 'typecast' || voiceProvider === 'elevenlabs') {
-      // Typecast / ElevenLabs multi-provider simulation or proxy response
-      // Generates a clean synthetic audio tone or preview base64 response
-      const ai = getGeminiClient();
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-tts-preview',
-        contents: [{ parts: [{ text: `[${voiceProvider.toUpperCase()} Voice ${voiceId}] ${sampleText}` }] }],
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Kore' }
-            }
-          }
-        }
-      });
-
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (base64Audio) {
-        ttsPreviewCache.set(cacheKey, base64Audio);
+    if (voiceProvider === 'typecast') {
+      const userKey = req.body.apiKey || (req.headers['x-typecast-key'] as string) || '';
+      if (!userKey) {
+        return res.json({ status: 'success', voiceId, voiceProvider, audioBase64: null, fromCache: false, message: 'Typecast API 키가 없어 폴백 음성을 사용합니다.' });
       }
-
+      const base64Audio = await synthesizeTypecastAudio(sampleText, voiceId, userKey);
+      if (base64Audio) ttsPreviewCache.set(cacheKey, base64Audio);
       return res.json({
         status: 'success',
         voiceId,
         voiceProvider,
-        audioBase64: base64Audio || null,
+        audioBase64: base64Audio,
+        audioFormat: base64Audio ? 'wav' : null,
         fromCache: false,
-        message: `${voiceProvider === 'typecast' ? '타입캐스트' : '일레븐랩스'} API 고품질 미리듣기 연동 완료`
+        message: base64Audio ? 'Typecast API 실시간 미리듣기 생성 완료' : 'Typecast 음성 생성에 실패했습니다.'
       });
+    }
+
+    if (voiceProvider === 'elevenlabs') {
+      // NOTE: not yet wired to a real ElevenLabs synthesis call — falls through to the
+      // Gemini path below so the preview at least produces *some* real audio rather than
+      // silently mislabeling Gemini output as ElevenLabs.
     }
 
     // Default Gemini TTS
@@ -1382,7 +1325,23 @@ app.post('/api/tts/preview', async (req, res) => {
 
 app.post('/api/generate-tts', async (req, res) => {
   try {
-    const { text, voiceName = 'Kore' } = req.body;
+    const { text, voiceName = 'Kore', voiceProvider = 'gemini', typecastKey } = req.body;
+
+    if (voiceProvider === 'typecast') {
+      const userKey = typecastKey || (req.headers['x-typecast-key'] as string) || '';
+      if (!userKey) {
+        return res.json({ status: 'success', voiceName, audioBase64: null, message: 'Typecast API 키가 없어 생성할 수 없습니다.' });
+      }
+      const base64Audio = await synthesizeTypecastAudio(text, voiceName, userKey);
+      return res.json({
+        status: 'success',
+        voiceName,
+        audioBase64: base64Audio,
+        audioFormat: base64Audio ? 'wav' : null,
+        message: base64Audio ? 'Typecast TTS 음성 생성 성공' : 'Typecast TTS 생성 실패'
+      });
+    }
+
     const ai = getGeminiClient();
 
     // Use Gemini 3.1 Flash TTS model
@@ -1405,6 +1364,7 @@ app.post('/api/generate-tts', async (req, res) => {
       status: 'success',
       voiceName,
       audioBase64: base64Audio || null,
+      audioFormat: base64Audio ? 'gemini_pcm' : null,
       message: base64Audio ? 'Gemini TTS 음성 생성 성공' : '기본 음성 매칭 완료'
     });
   } catch (err: any) {
@@ -1470,69 +1430,118 @@ Return JSON with:
 });
 
 // 8. Trend Benchmarking API (Tab 1)
+// Extracts the first JSON array/object from a Gemini text response, tolerating
+// markdown code fences — needed because responseMimeType:'application/json' is not
+// reliable when combined with the googleSearch grounding tool.
+function extractJson(rawText: string): any {
+  const cleaned = (rawText || '').trim();
+  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+  const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+  const candidate = arrayMatch?.[0] || objectMatch?.[0];
+  if (!candidate) return null;
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+}
+
+const TODAY_KST = () => new Date().toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: 'long', day: 'numeric' });
+
 app.post('/api/trends/analyze', async (req, res) => {
   try {
     const { category = '주방/아이디어', keyword = '기름때 세제' } = req.body;
     const ai = getGeminiClient();
 
     const prompt = `
-카테고리 "${category}" 및 키워드 "${keyword}"에 대한 유튜브 쇼츠/틱톡/도우인 바이럴 쇼핑 주제 3~5개와 벤치마킹 분석 결과를 JSON으로 리턴하세요.
+오늘은 ${TODAY_KST()}입니다 (대한민국 기준).
 
-JSON 구조:
-{
-  "category": "${category}",
-  "trends": [
-    {
-      "id": "tr_1",
-      "title": "바이럴 쇼핑 주제 제목",
-      "platform": "유튜브 Shorts / 틱톡 / 도우인",
-      "estimated_views": "150만회+",
-      "hook_style": "3초 공감 후킹",
-      "viral_points": ["포인트 1", "포인트 2"],
-      "benchmark_url": "https://youtube.com/shorts/sample1",
-      "recommended_keywords": ["키워드1", "키워드2"]
-    }
-  ]
-}
+실제 Google 검색을 사용하여, 카테고리 "${category}" 및 키워드 "${keyword}"와 관련해 최근 유튜브 쇼츠/틱톡/도우인에서 실제로 화제가 되고 있는 바이럴 쇼핑 주제를 3~5개 조사하세요. 검색으로 확인되지 않는 내용은 지어내지 말고, 확인된 사실만 사용하세요. 조회수 등 정확한 수치를 확인할 수 없으면 "확인불가"로 표기하세요.
+
+다른 설명 없이 아래 JSON 배열 형식으로만 응답하세요:
+[
+  {
+    "id": "tr_1",
+    "title": "실제 확인된 바이럴 쇼핑 주제 제목",
+    "platform": "유튜브 Shorts / 틱톡 / 도우인 중 실제 확인된 플랫폼",
+    "estimated_views": "검색으로 확인된 대략적 조회수 또는 확인불가",
+    "hook_style": "실제 관찰된 후킹 패턴",
+    "viral_points": ["검색으로 확인한 포인트 1", "포인트 2"],
+    "benchmark_url": "실제 검색으로 찾은 출처 URL (없으면 빈 문자열)",
+    "recommended_keywords": ["키워드1", "키워드2"]
+  }
+]
 `;
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
       contents: prompt,
       config: {
-        responseMimeType: 'application/json'
+        tools: [{ googleSearch: {} }]
       }
     });
 
-    const parsed = JSON.parse(response.text || '{}');
-    res.json({ status: 'success', data: parsed.trends || [] });
+    const parsed = extractJson(response.text || '');
+    if (!Array.isArray(parsed)) {
+      console.warn('[Trend Analyze Parse Failure] Raw response:', (response.text || '').slice(0, 1000));
+      throw new Error('검색 결과를 구조화된 형식으로 파싱하지 못했습니다.');
+    }
+    res.json({ status: 'success', data: parsed, grounded: true });
   } catch (err: any) {
     console.error('[Trend Analyze Error]', err);
-    res.json({
-      status: 'success',
-      data: [
-        {
-          id: 'tr_1',
-          title: '3초 만에 찌든때 지우는 천연 오렌지 폼클리너',
-          platform: '도우인 / 유튜브 Shorts',
-          estimated_views: '240만회+',
-          hook_style: '극강의 시각적 비교 비포/애프터',
-          viral_points: ['기름때에 뿌리자마자 거품 색상 변경', '손대지 않고 물로만 행궈내는 장면'],
-          benchmark_url: 'https://youtube.com/shorts/sample_trend1',
-          recommended_keywords: ['기름때클리너', '주방꿀템', '쿠팡추천']
-        },
-        {
-          id: 'tr_2',
-          title: '자취생 필수! 공간 차지 0% 접이식 냄비 받침대',
-          platform: '틱톡 / 릴스',
-          estimated_views: '180만회+',
-          hook_style: '불편한 일상 장면 제시 후 반전',
-          viral_points: ['한 손으로 1초 만에 접히는 가젯', '실리콘 내열 230도 입증'],
-          benchmark_url: 'https://youtube.com/shorts/sample_trend2',
-          recommended_keywords: ['자취꿀템', '접이식받침대', '아이디어상품']
-        }
-      ]
+    // Honest failure — no fabricated fallback data. The whole point of this endpoint
+    // is real search-grounded results, so silently substituting canned examples here
+    // would defeat the purpose and mislead the user.
+    res.status(502).json({
+      status: 'error',
+      message: '실시간 트렌드 검색에 실패했습니다. 잠시 후 다시 시도해 주세요.'
     });
+  }
+});
+
+// Auto-run on page load with no input — surfaces currently trending shopping categories/
+// products via real Google Search grounding, so the trend page isn't a blank form on first visit.
+app.post('/api/trends/auto-recommend', async (req, res) => {
+  try {
+    const ai = getGeminiClient();
+
+    const prompt = `
+오늘은 ${TODAY_KST()}입니다 (대한민국 기준).
+
+실제 Google 검색을 사용하여, 지금 이 시점 기준 대한민국에서 화제가 되고 있거나 계절적으로 수요가 급증하는 "쇼핑 쇼츠(제휴마케팅 숏폼 영상)" 소재가 될 만한 카테고리와 구체적인 상품 아이디어를 조사하세요. 계절/시즌 이슈(예: 현재 계절의 날씨, 휴가철, 명절 등), 최근 뉴스/블로그/커뮤니티에서 실제로 언급되는 인기 상품을 반영해야 합니다. 검색으로 확인되지 않는 내용은 절대 지어내지 마세요.
+
+5개를 찾아서, 다른 설명 없이 아래 JSON 배열 형식으로만 응답하세요:
+[
+  {
+    "id": "auto_1",
+    "title": "구체적인 트렌드 주제 (예: 여름 휴대용 목선풍기 인기 급상승)",
+    "platform": "실제 확인된 플랫폼/출처",
+    "estimated_views": "확인된 수치 또는 확인불가",
+    "hook_style": "이 소재에 어울리는 후킹 방향 제안",
+    "viral_points": ["검색으로 확인한 근거 1", "근거 2"],
+    "benchmark_url": "실제 출처 URL (없으면 빈 문자열)",
+    "recommended_keywords": ["키워드1", "키워드2", "키워드3"]
+  }
+]
+`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: prompt,
+      config: {
+        tools: [{ googleSearch: {} }]
+      }
+    });
+
+    const parsed = extractJson(response.text || '');
+    if (!Array.isArray(parsed)) {
+      throw new Error('검색 결과를 구조화된 형식으로 파싱하지 못했습니다.');
+    }
+    res.json({ status: 'success', data: parsed, grounded: true, groundedAt: TODAY_KST() });
+  } catch (err: any) {
+    console.error('[Trend Auto-Recommend Error]', err);
+    // Same honesty rule: empty result + a clear message, never fabricated placeholders.
+    res.status(502).json({ status: 'error', message: '실시간 추천을 가져오지 못했습니다.', data: [] });
   }
 });
 
@@ -2018,17 +2027,21 @@ app.post('/api/render-video', (req, res) => {
         return;
       }
 
-      // Narration: prefer the combined TTS track generated client-side during the Audio step
-      // (audioConfig.narrationAudioBase64 — raw 16-bit PCM @24kHz mono, per Gemini's audio output format).
+      // Narration: prefer the combined TTS track generated client-side during the Audio step.
+      // Format depends on which TTS provider generated it — Gemini returns raw 16-bit PCM
+      // @24kHz mono with no container (needs an explicit ffmpeg -f s16le), while Typecast
+      // returns a real WAV file ffmpeg can read directly. audioConfig.narrationAudioFormat
+      // (set by AudioStudioView from /api/generate-tts's response) tells us which.
       let narrationLocalPath = '';
       let narrationIsRawPcm = false;
       if (audioConfig?.narrationAudioBase64) {
         try {
+          const isRawPcm = audioConfig.narrationAudioFormat !== 'wav';
           const buf = Buffer.from(audioConfig.narrationAudioBase64, 'base64');
-          const tmpPath = path.join(process.cwd(), 'public', 'exports', `narr_${jobId}.pcm`);
+          const tmpPath = path.join(process.cwd(), 'public', 'exports', `narr_${jobId}.${isRawPcm ? 'pcm' : 'wav'}`);
           fs.writeFileSync(tmpPath, buf);
           narrationLocalPath = tmpPath;
-          narrationIsRawPcm = true;
+          narrationIsRawPcm = isRawPcm;
         } catch (err: any) {
           console.warn('[Narration Decode Warning]', err.message);
         }

@@ -152,7 +152,8 @@ export const AudioStudioView: React.FC<AudioStudioViewProps> = ({
       setIsPreviewLoading(null);
 
       if (data?.audioBase64) {
-        const audio = new Audio(`data:audio/mp3;base64,${data.audioBase64}`);
+        const mime = data.audioFormat === 'wav' ? 'audio/wav' : 'audio/mp3';
+        const audio = new Audio(`data:${mime};base64,${data.audioBase64}`);
         audioElementRef.current = audio;
         audio.onended = () => {
           setPreviewingVoiceId(null);
@@ -285,7 +286,9 @@ export const AudioStudioView: React.FC<AudioStudioViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: fullNarration,
-          voiceName: audioConfig.voice_id
+          voiceName: audioConfig.voice_id,
+          voiceProvider: audioConfig.voice_provider || 'gemini',
+          typecastKey: localStorage.getItem('lucy_api_typecast_key') || ''
         })
       });
 
@@ -307,10 +310,15 @@ export const AudioStudioView: React.FC<AudioStudioViewProps> = ({
         onUpdateAudioConfig({
           ...audioConfig,
           narrationAudioBase64: data.audioBase64,
+          narrationAudioFormat: data.audioFormat === 'wav' ? 'wav' : 'gemini_pcm',
           narrationGeneratedAt: new Date().toISOString()
         });
-        const audio = new Audio(`data:audio/mp3;base64,${data.audioBase64}`);
-        audio.play().catch(() => {});
+        // Gemini's format is raw PCM with no container, which <audio>/data-URI playback can't
+        // decode directly — only attempt browser playback for real containerized audio (WAV).
+        if (data.audioFormat === 'wav') {
+          const audio = new Audio(`data:audio/wav;base64,${data.audioBase64}`);
+          audio.play().catch(() => {});
+        }
       } else if ('speechSynthesis' in window) {
         const utterance = new SpeechSynthesisUtterance(scenes[0]?.narration || fullNarration);
         utterance.lang = 'ko-KR';

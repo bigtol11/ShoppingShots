@@ -104,6 +104,9 @@ export interface AudioConfig {
   // Combined narration audio for the full scene sequence, generated once via /api/generate-tts
   // and carried through to /api/render-video so the final render uses real narration.
   narrationAudioBase64?: string;
+  // 'gemini_pcm' = raw 16-bit PCM @24kHz mono (needs explicit ffmpeg -f s16le on render);
+  // 'wav' = a real WAV container (e.g. Typecast) that ffmpeg can read directly.
+  narrationAudioFormat?: 'gemini_pcm' | 'wav';
   narrationGeneratedAt?: string;
 }
 
