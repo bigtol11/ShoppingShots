@@ -15,7 +15,10 @@ import { saveCompletedProject } from './utils/projectsStore';
 import { signInWithGoogle } from './utils/firebaseAuth';
 import { AlertTriangle, ArrowRight } from 'lucide-react';
 
-const DEFAULT_EMPTY_PROJECT: ProjectData = {
+// Factory (not a shared const) — every call returns fresh nested objects/arrays,
+// so resetting mid-pipeline can never leak state from the discarded project via
+// a shared array/object reference.
+const makeEmptyProject = (): ProjectData => ({
   id: 'proj-new',
   name: '신규 쇼츠 프로젝트',
   updatedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
@@ -49,7 +52,7 @@ const DEFAULT_EMPTY_PROJECT: ProjectData = {
     bgm_id: 'upbeat_acoustic',
     bgm_volume: 0.15
   }
-};
+});
 
 // 6-step core automation pipeline: trend -> product -> script -> storyboard -> audio -> render
 const STEP_SEQUENCE = ['trend', 'product', 'script', 'storyboard', 'audio', 'render'];
@@ -105,8 +108,22 @@ export default function App() {
 
   const [activeStep, setActiveStep] = useState<string>('trend');
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
-  const [project, setProject] = useState<ProjectData>(DEFAULT_EMPTY_PROJECT);
+  const [project, setProject] = useState<ProjectData>(makeEmptyProject);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+
+  // Discards all in-progress work (product/script/storyboard/audio/render state)
+  // and returns to a blank step 1 — used by the "+ 새 쇼핑쇼츠 기획" reset button,
+  // available from any step so the user isn't stuck mid-pipeline with something
+  // they don't want to continue.
+  const handleResetProject = () => {
+    setProject(makeEmptyProject());
+    setCompletedSteps([]);
+    setValidationWarning(null);
+    setActiveStep('trend');
+    setIsResetConfirmOpen(false);
+    setIsSidebarOpen(false);
+  };
 
   const markStepCompleted = (stepId: string) => {
     if (!completedSteps.includes(stepId)) {
@@ -252,6 +269,7 @@ export default function App() {
         onLogin={handleGoogleLogin}
         isLoggingIn={isLoggingIn}
         onMenuClick={() => setIsSidebarOpen(true)}
+        onNewProject={() => setIsResetConfirmOpen(true)}
       />
 
       {authError && (
@@ -361,6 +379,49 @@ export default function App() {
       </div>
 
       <AnimatePresence>
+        {isResetConfirmOpen && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#1a172c] border border-rose-500/50 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 relative overflow-hidden"
+            >
+              <div className="flex items-center space-x-3 text-rose-400 border-b border-[#2d284e] pb-3">
+                <div className="p-2 bg-rose-950/60 rounded-xl border border-rose-800/50">
+                  <AlertTriangle className="w-6 h-6 text-rose-400 shrink-0" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">새 쇼핑쇼츠 기획을 시작할까요?</h3>
+                  <span className="text-[11px] text-rose-300/80 font-medium">현재까지 진행한 내용은 되돌릴 수 없습니다</span>
+                </div>
+              </div>
+
+              <div className="bg-[#121020] border border-[#2b254d] p-3.5 rounded-xl space-y-1 text-xs text-slate-300">
+                <p className="leading-relaxed">
+                  상품 정보, 생성된 대본, 스토리보드, 오디오 설정 등 현재 진행 중인 모든 내용이 초기화되고
+                  1단계(트렌드 탐색)부터 새로 시작합니다. 이미 완성해서 저장한 영상은 "내 프로젝트"에
+                  그대로 남아있으니 걱정하지 않으셔도 됩니다.
+                </p>
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row gap-2">
+                <button
+                  onClick={() => setIsResetConfirmOpen(false)}
+                  className="flex-1 bg-[#231f3c] hover:bg-[#2e294f] text-slate-200 text-xs py-2.5 rounded-xl font-medium border border-[#3b3464] transition text-center"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleResetProject}
+                  className="flex-1 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs py-2.5 rounded-xl font-bold shadow-md shadow-rose-900/40 flex items-center justify-center space-x-1 transition"
+                >
+                  <span>초기화하고 새로 시작</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
         {validationWarning && (
           <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
             <motion.div

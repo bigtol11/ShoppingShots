@@ -1,5 +1,5 @@
 import React from 'react';
-import { Star, Moon, FolderKanban, Settings, Sparkles, LogOut, LogIn, RefreshCw, Menu, Home } from 'lucide-react';
+import { Star, Moon, FolderKanban, Settings, Sparkles, LogOut, LogIn, RefreshCw, Menu, Home, Plus } from 'lucide-react';
 
 interface HeaderProps {
   activeTab: string;
@@ -10,9 +10,10 @@ interface HeaderProps {
   onLogin?: () => void;
   isLoggingIn?: boolean;
   onMenuClick?: () => void;
+  onNewProject?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, projectName, userEmail, onLogout, onLogin, isLoggingIn, onMenuClick }) => {
+export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, projectName, userEmail, onLogout, onLogin, isLoggingIn, onMenuClick, onNewProject }) => {
   return (
     <header className="bg-[#12111d] border-b border-[#2d2948] px-2.5 sm:px-4 py-2.5 flex items-center justify-between text-slate-200 select-none sticky top-0 z-50">
       <div className="flex items-center space-x-2 sm:space-x-6 min-w-0">
@@ -77,6 +78,18 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, project
 
       {/* Right Controls */}
       <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
+        {/* New project reset - available from any tab, discards current in-progress project */}
+        {onNewProject && (
+          <button
+            onClick={onNewProject}
+            title="새 쇼핑쇼츠 기획 (현재 진행중인 내용 초기화)"
+            className="flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-md min-h-[40px] bg-[#231d40] hover:bg-rose-950/60 border border-[#3b3266] hover:border-rose-700/50 text-purple-200 hover:text-rose-200"
+          >
+            <Plus className="w-3.5 h-3.5 text-purple-300 shrink-0" />
+            <span className="hidden sm:inline">새 쇼핑쇼츠 기획(초기화)</span>
+          </button>
+        )}
+
         {/* Settings button shortcut - icon-only on narrow screens */}
         <button
           onClick={() => setActiveTab('settings')}
