@@ -616,36 +616,38 @@ app.post('/api/generate-scripts', async (req, res) => {
     const { productFacts, targetDuration = 18, selectedStyle = '정보전달 쇼핑쇼츠', additionalInstructions = '' } = req.body;
     const ai = getGeminiClient(getUserGeminiKey(req));
     const styleGuide = SCRIPT_STYLE_GUIDES[selectedStyle] || SCRIPT_STYLE_GUIDES['정보전달 쇼핑쇼츠'];
+    const targetChars = targetDuration <= 20 ? '150~200자' : '250~300자(최대 한도)';
 
     const prompt = `
-당신은 대한민국 최상위 1% 쇼핑쇼츠(제휴마케팅 숏폼) 전문 대본가입니다. 이 앱은 오직 "조회수가 최대한 많이 나오는 쇼핑쇼츠"를 만들기 위한 것입니다 — 아래 대본은 실제로 유튜브 쇼츠/틱톡 알고리즘에 올라타서 최대한 많은 사람이 끝까지 보게 만드는 것이 최우선 목표입니다.
+당신은 월 1,000만 원 이상의 수익을 올리는 대한민국 최상위 1% 쇼핑쇼츠(제휴마케팅 숏폼) 전문 카피라이터입니다. 이 대본의 유일한 목표는 실제로 유튜브 쇼츠/틱톡 알고리즘에 올라타서 최대한 많은 사람이 끝까지 보고, 댓글/저장까지 남기게 만드는 것입니다. 이 영상은 광고가 아니라 "정보 콘텐츠"처럼 느껴져야 합니다 — 시청자가 "몰랐다 → 알았다 → 갖고 싶다" 순서로 자연스럽게 이동해야 하며, "친구가 신기한 정보를 발견해서 흥분해서 알려주는" 톤을 유지하세요.
 
 [상품명]: ${productFacts?.product_name || '상품'}
 [핵심 팩트]: ${JSON.stringify(productFacts?.verified_facts || [])}
 [사용 상황]: ${JSON.stringify(productFacts?.use_cases || [])}
-[목표 영상 길이]: ${targetDuration}초 (한국어 읽기 속도 기준 약 ${Math.round(targetDuration * 14)}글자)
+[목표 영상 길이]: ${targetDuration}초 (총 글자 수 ${targetChars} 이내, 1초당 약 5~6글자 기준)
 
 [선택된 대본 스타일]: "${selectedStyle}"
 [이 스타일의 정의 — 반드시 이 톤/구조를 따를 것]: ${styleGuide}
 
 [조회수 최대화 알고리즘 — 실제 플랫폼 데이터 기반, 모든 대본 공통 절대 원칙]:
-숏폼 알고리즘 순위 결정 요인의 40~50%는 "완주율/시청 지속시간"이며, 그 완주율은 전적으로 첫 3초에서 결정된다.
-첫 3초 이탈 방지에 실패하면 알고리즘이 영상을 아예 확산시키지 않는다. 참고 벤치마크: 3초 지점 잔존율 70%↔ 확산 가능성 큼, 15초 지점 60%, 30초 지점 50%.
-클릭률 최상위 영상의 63%가 정확히 3초 안에 후킹을 완료한다. 후킹 문장은 10~14단어(한국어 기준 약 20~35자) 내로 짧고 강력해야 한다.
+숏폼 알고리즘 순위 결정 요인의 40~50%는 "완주율/시청 지속시간"이며, 완주율 60% 이상이면 알고리즘 배포, 80% 이상이면 공격적 배포로 이어진다. 그 완주율은 전적으로 첫 3초에서 결정된다 — 클릭률 최상위 영상의 63%가 정확히 3초 안에 후킹을 완료한다.
 
-1. **첫 문장(3초, 약 20~35자)은 아래 6가지 검증된 후킹 공식 중 이 대본에 가장 잘 맞는 것을 반드시 하나 선택해 사용하라**:
-   - **통념 뒤집기(Contrarian Claim)**: 사람들이 당연하다고 믿는 것을 정면으로 반박 ("○○ 하면 안 됩니다", "다들 이렇게 알고 있는데 틀렸습니다")
-   - **실수 경고(Mistake Warning)**: 시청자가 이미 하고 있을 법한 실수를 지적 ("이거 모르고 쓰면 손해입니다")
-   - **리스트 예고(List Tease)**: 앞으로 나올 정보의 개수를 미리 제시해 완주를 유도 ("이거 3가지만 알면 끝")
-   - **문제-자극-해결(Problem-Agitate-Solve)**: 0~3초 공감되는 불편/문제 제시 → 3~10초 그 문제를 더 구체적으로 자극 → 10~20초 상품으로 해결 → 마지막 3~5초 CTA
-   - **비포/애프터(Before-After)**: 사용 전과 후의 극명한 대비를 첫 문장에서부터 예고
-   - **패턴 인터럽트(Pattern Interrupt)**: 예상 밖의 발언이나 상황으로 스크롤을 멈추게 하는 시각적/청각적 충격
-2. 도입부에서 "이 영상을 끝까지 봐야 하는 이유"(궁금증 미해소, 손해 회피 심리 등)를 명확히 심어라.
-3. 문장은 짧고 리듬감 있게 — 한 문장에 하나의 정보만. 지나치게 다듬어진 광고 카피보다, 실제 사람이 말하듯 약간 날것의 진솔한 톤이 전환율이 더 높다.
-4. 마지막은 명확한 CTA(구매 유도, 저장/공유 유도, 댓글 유도 중 하나)로 마무리.
-5. 구어체 말투(~음/~함/~했음 또는 ~죠?, ~해보세요)를 엄격히 지켜라. 문어체/뉴스체 금지.
-6. 팩트에 없는 가짜 스펙이나 거짓 체험담("내가 3년째 쓰고 있는데" 등)은 절대 금지 — 위에 주어진 핵심 팩트 범위 내에서만 작성.
-${additionalInstructions ? `7. 추가 지시사항(반드시 반영): ${additionalInstructions}` : ''}
+1. **첫 문장(3초, 10~14단어/한국어 약 20~35자)은 아래 검증된 후킹 공식 중 이 대본에 가장 잘 맞는 것을 하나 선택해 사용하라** — 첫 문장을 들으면 "뭔 소리야?" 반응이 나와야 한다:
+   - **의심형/통념 뒤집기**: "이거, 냉장고야 냉동고야?" / "○○ 하면 안 됩니다" 류로 상식을 정면 반박하거나 의문을 던짐
+   - **폭로형/실수 경고**: "이거 모르고 쓰면 손해입니다" / "아이스박스 버리게 만드는 게 있음" 류로 몰랐던 손해·손실을 경고
+   - **리스트 예고**: "이거 3가지만 알면 끝" 류로 앞으로 나올 정보량을 예고해 완주를 유도
+   - **문제-자극-해결(PAS)**: 0~3초 공감되는 불편 제시 → 3~8초 문제를 구체적으로 자극 → 8~18초 상품으로 해결 → 마지막 CTA
+   - **비포/애프터**: 사용 전/후 극명한 대비를 첫 문장부터 예고
+   - **시점반전형/광기형**: "운전자는 절대 모름" / 예상 밖의 발언이나 과장된 상황으로 스크롤을 물리적으로 멈추게 함
+2. **상품명·브랜드명을 본문(full_text) 대사에서 절대 직접 언급하지 마라.** "이 제품", "이거", "이게"로만 지칭하여 궁금증을 유지하라 (제목/썸네일 카피는 예외 — 검색 노출을 위해 상품명을 포함해도 된다).
+3. **설명하지 말고 장면으로 보여줘라.** 스펙을 나열하지 말고 상황으로 표현하라 (예: "배터리 보호 3단계" 대신 "차 배터리 안 죽음"). 광고 멘트·홍보성 표현 대신 "내가 직접 써보니" 같은 1인칭 경험담 구조가 신뢰도가 가장 높다.
+4. **인간 심리 5단계 흐름을 대본 전체에 반영하라**: 의외성(이게 뭐야?) → 공감(나도 이런 상황 있었는데) → 반전(근데 이건 다름) → 소유욕(은근 탐남) → 논쟁/저장욕(저장해둬야겠다 / 댓글로 말해봐).
+5. **루프 연결 구조**: 마지막 장면이 첫 장면과 자연스럽게 이어지도록 설계해 반복 시청을 유도하라.
+6. **마지막 문장은 댓글 또는 저장을 유도하는 구체적 문구로 마무리하라** (예: 찬반 논쟁형 "필요하다 vs 개오바다", 경험 공유형 "이런 상황 겪어본 사람?", 저장 유도형 "장마 전에 저장해둬").
+7. 문장은 짧고 리듬감 있게 — 한 문장에 하나의 정보만. 문장 끝은 컷이라고 생각하고 불필요한 연결어는 쓰지 마라.
+8. 구어체 말투(~음/~함/~했음 또는 ~죠?, ~해보세요)를 엄격히 지켜라. 문어체/뉴스체 금지. "개편함", "개실용적" 같은 한국식 구어체 강조 표현도 자연스럽게 섞어도 좋다.
+9. 팩트에 없는 가짜 스펙이나 거짓 체험담(구체적 기간 등)은 절대 금지 — 위에 주어진 핵심 팩트 범위 내에서만 작성. 리뷰의 단점/불만은 대본에 직접 언급하지 말 것(구매 흐름 방해 요소 배제).
+${additionalInstructions ? `10. 추가 지시사항(반드시 반영): ${additionalInstructions}` : ''}
 
 [출력 요구사항]:
 "${selectedStyle}" 스타일을 따르되, 위 6가지 후킹 공식 중 서로 다른 3개를 각각 적용한 대본 3개(변형 A/B/C)를 생성하라. 3개 모두 같은 스타일이어야 하며 (다른 스타일로 바꾸지 말 것), 어떤 후킹 공식을 썼는지 hook_type 필드에 명시하라 (예: "통념 뒤집기", "문제-자극-해결" 등).
@@ -691,7 +693,7 @@ JSON 형태로 각 대본의 id, title, style(항상 "${selectedStyle}"), target
           style: req.body.selectedStyle || '정보전달 쇼핑쇼츠',
           target_duration_sec: 18,
           hook_type: '생성 실패 - 기본 대본',
-          full_text: `${req.body.productFacts?.product_name || '이 상품'}, 이거 아직도 모르고 계셨다면 손해입니다. 지금 바로 확인해 보세요.`,
+          full_text: `이거, 아직도 모르고 계셨다면 손해입니다. 지금 바로 확인해 보세요.`,
           risk_notes: ['AI 생성 실패로 인한 기본 대본입니다. 다시 시도해 주세요.'],
           confidence_score: 0.3
         }
@@ -1443,19 +1445,27 @@ app.post('/api/generate-tts', async (req, res) => {
 // 6. Veo / AI Video Prompt Construction Endpoint
 app.post('/api/generate-ai-video-prompt', async (req, res) => {
   try {
-    const { visualDescription, productName } = req.body;
+    const { visualDescription, productName, clipRole = '정보전달' } = req.body;
     const ai = getGeminiClient(getUserGeminiKey(req));
 
     const prompt = `
-Create a precise, safe video prompt for AI video generators (Veo/Kling) for a Korean shopping shorts video.
-The prompt must be in English, strictly photorealistic, 9:16 vertical ratio, avoiding any false medical or policy-violating text.
+Create a precise, safe video prompt for AI video generators (Seedance/Veo/Kling) for a Korean shopping shorts clip, based on a reference product image.
 
 Product: ${productName}
 Visual Scene: ${visualDescription}
+Clip role: ${clipRole} (후킹 clips: 3-5s and need a strong, arresting first frame; 정보전달 clips: 4-5s and should read as calm demonstration; 광고형 clips: 6-7s and can build a short beat-by-beat sequence)
+
+**Absolute motion-restraint rules (critical — violating these breaks product consistency in the generated video):**
+1. The prompt MUST start with this exact consistency phrase: "The scene is exactly as the reference image — do not change any detail." Then describe only the MOTION to add on top of that static scene.
+2. NEVER use aggressive/violent motion verbs: no "slam", "plunge", "explode", "crash", "smash", "aggressively", "violently", "rapidly", "suddenly". These cause the AI video model to distort or morph the product.
+3. ONLY use gentle, controlled motion verbs: "slowly", "gently", "naturally", "carefully", "deliberately". Motion should look like a real camera operator handling a real product, not a special-effects shot.
+4. Camera movement must be described as a deliberate camera move, not a zoom: prefer "the camera slowly drifts toward the product" / "the camera gently orbits around the product" / "first-person POV hand slowly reaches for the product" over "zoom in" or "cut to close-up".
+5. Keep the described motion physically simple and short enough to render cleanly within the clip's duration — do not pack multiple distinct actions into one clip.
+6. Strictly photorealistic, 9:16 vertical ratio, avoid any false medical or policy-violating claims in on-screen elements.
 
 Return JSON with:
-- English Veo Prompt
-- Negative Prompts
+- English Seedance/Veo Prompt (must include the mandatory consistency phrase verbatim as its opening sentence)
+- Negative Prompts (must include: slam, plunge, explode, aggressively, distorted product, morphing, warping, extra limbs, watermark, blurry, low resolution, floating text)
 - Safety Checklist Passed (boolean)
 `;
 
@@ -1482,8 +1492,8 @@ Return JSON with:
     res.json({
       status: 'success',
       data: {
-        veoPrompt: `Photorealistic 9:16 vertical video clip showing ${req.body.visualDescription || 'product in action'}. Clean lighting, 30fps.`,
-        negativePrompt: 'blurry, low resolution, watermark, floating text, distorted product',
+        veoPrompt: `The scene is exactly as the reference image — do not change any detail. The camera slowly and gently drifts toward the product showing ${req.body.visualDescription || 'product in action'}. Clean lighting, 30fps, photorealistic 9:16 vertical.`,
+        negativePrompt: 'slam, plunge, explode, aggressively, blurry, low resolution, watermark, floating text, distorted product, morphing, warping',
         safetyCheckPassed: true
       }
     });
@@ -1934,31 +1944,24 @@ app.post('/api/seo/generate-metadata', async (req, res) => {
     const ai = getGeminiClient(getUserGeminiKey(req));
 
     const prompt = `
-상품 "${productName}" 및 대본 내용으로 멀티플랫폼(유튜브 Shorts, 틱톡, 인스타그램 릴스, 네이버 클립) SEO 메타데이터를 작성하세요.
+상품 "${productName}" 및 아래 대본 내용을 기반으로 멀티플랫폼(유튜브 Shorts, 틱톡, 인스타그램 릴스, 네이버 클립) 업로드 메타데이터를 작성하세요. 각 플랫폼의 실제 알고리즘 노출 관행을 반영해야 합니다.
+
+[대본]: ${scriptText || '(대본 없음, 상품명 기준으로 작성)'}
+
+플랫폼별 규칙:
+- 유튜브 Shorts: title은 14~16자 내외로 핵심 궁금증 1개만 담을 것(낚시성 과장 금지). description은 1~2문장 요약 + 관련 키워드 자연 삽입 구조. hashtags는 6~8개(대표 키워드+세부 키워드 혼합). pinned_comment는 정확히 3줄 이내: 구매 링크 유도 1줄 + 유료광고/파트너스 고지 1줄 + 댓글 유도 질문 1줄.
+- 틱톡: title은 궁금증을 남기는 짧은 후킹 카피(대본 첫 문장과 톤 일치). tags는 4~6개(#tiktokmademebuyit 류의 플랫폼 관용 태그 1개 포함). pinned_comment는 2줄 이내, 캐주얼한 톤.
+- 인스타그램 릴스: title은 캐치프레이즈 한 줄. hashtags는 정확히 5개 이하(2026년 정책상 과도한 해시태그는 도달 저하). caption은 훅 문장 + 댓글/디엠 유도 CTA 구조.
+- 네이버 클립: title은 24자 이내, 상품명을 명확히 포함(네이버는 검색 노출형 플랫폼이므로 상품명 생략 금지). tags는 쇼핑 카테고리 태그 위주 3~5개. pinned_comment는 적립/혜택 안내 톤 1~2줄.
+
+공통: 모든 텍스트는 팩트 기반이어야 하며 확인되지 않은 효능/의학적 주장은 금지.
 
 JSON 출력:
 {
-  "youtube_shorts": {
-    "title": "알고리즘 탑승 유튜브 제목 2개",
-    "description": "설명란 메타데이터",
-    "hashtags": ["#쇼츠", "#쿠팡추천", "#내돈내산"],
-    "pinned_comment": "고정댓글 텍스트"
-  },
-  "tiktok": {
-    "title": "틱톡 후킹 카피",
-    "tags": ["#tiktokmademebuyit", "#추천"],
-    "pinned_comment": "틱톡 고정댓글"
-  },
-  "instagram_reels": {
-    "title": "릴스 캐치프레이즈",
-    "hashtags": ["#릴스", "#살림템"],
-    "caption": "본문 캡션 및 링크 안내"
-  },
-  "naver_clip": {
-    "title": "네이버 클립 제목",
-    "tags": ["#네이버쇼핑", "#핫딜"],
-    "pinned_comment": "네이버클립 고정댓글"
-  }
+  "youtube_shorts": { "title": "...", "description": "...", "hashtags": ["#쇼츠", "..."], "pinned_comment": "..." },
+  "tiktok": { "title": "...", "tags": ["#tiktokmademebuyit", "..."], "pinned_comment": "..." },
+  "instagram_reels": { "title": "...", "hashtags": ["최대 5개"], "caption": "..." },
+  "naver_clip": { "title": "...", "tags": ["..."], "pinned_comment": "..." }
 }
 `;
 

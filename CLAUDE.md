@@ -85,10 +85,15 @@ remember to bump the version first (see above).
 Plus `settings` (API keys, admin fal.ai key panel) and `projects` (완성본 갤러리, `ProjectsView`) as top-level nav items outside the step sequence.
 
 ### Auth
-Invite-only accounts (bcrypt password hash + JWT session cookie, `LoginView.tsx`
-gates the whole app). No public signup without `SIGNUP_INVITE_CODE` matching.
-Every `/api/*` route except `/api/auth/*` requires a valid session
-(`requireUser` middleware, global `app.use('/api', ...)` gate in `server.ts`).
+Google Sign-In only (Firebase Authentication client SDK popup → ID token →
+`/api/auth/google` verifies via `admin.auth().verifyIdToken()` → app issues its
+own JWT session cookie). Gated by `ALLOWED_EMAILS`. The main page is visible
+without forcing login; a top-right button in `Header.tsx` triggers sign-in.
+`LoginView.tsx` was deleted — the old bcrypt+invite-code system it belonged to
+is fully gone. Every `/api/*` route except `/api/auth/*` requires a valid
+session (`requireUser` middleware, global `app.use('/api', ...)` gate in
+`server.ts`). Admin-only endpoints are gated separately by `ADMIN_EMAILS`
+checked against the same session (no separate admin password).
 
 ### Storage: dual-mode (local files ↔ Firestore/Cloud Storage)
 Controlled entirely by whether `service-account.json` (or `FIREBASE_SERVICE_ACCOUNT_PATH`)
@@ -314,11 +319,52 @@ to git but **deliberately not deployed**; the live site is still v1.0.2. User
 also gave a real fal.ai key in chat (see "Not yet deployed" list above) but
 asked to hold off deploying it too. **Do not deploy any of this until told to.**
 
+### 2026-08-01 (continued) — Home buttons, script-generation prompt overhaul (씬스팩토리TV v3.0 reference doc)
+
+**Home button on every tab**: added a clickable logo + explicit "🏠 첫 화면"
+nav button in `Header.tsx` (both return to `trend`, confirmed as the actual
+first/main screen).
+
+**Script generation prompt overhaul**: user shared a large external
+instruction document ("씬스팩토리TV 멀티플랫폼 쇼핑 쇼츠 마스터 지시문 v3.0")
+after two earlier upload attempts were unreadable (mojibake) — recovered by
+having the user paste the raw text directly in chat. Explicitly scoped what
+to adopt vs. skip before touching code: adopted the 5-step psychology
+structure (의외성→공감→반전→소유욕→논쟁/저장욕), exact length discipline
+(150~200자 for 15~20초, ~5~6글자/초), the product/brand-name-omission rule
+(narration must say "이 제품/이거/이게", never the literal name — title/SEO
+text is exempt since it needs the name for search), the "show a scene, don't
+list a spec" rule, loop-back ending structure, and concrete comment/save-bait
+closing-line patterns. Explicitly did NOT adopt: the document's hardcoded
+personal channel name/link (too user-specific for a multi-tenant app) and its
+chatbot-style step-by-step "wait for 시작 signal" conversational flow (this
+app already has a stepped UI, that flow doesn't map onto it). Merged all of
+this into the existing research-backed 6-hook-formula system (`/api/generate-scripts`
+in `server.ts`) rather than replacing it — the two were complementary, not
+conflicting.
+
+Also updated `/api/generate-ai-video-prompt` with the same document's
+AI-video motion-restraint rules (mandatory "The scene is exactly as the
+reference image — do not change any detail." opening line; banned aggressive
+verbs like slam/plunge/explode; only gentle verbs like slowly/gently/naturally
+allowed; camera moves described as "drifts toward"/"orbits" rather than
+"zoom") — this reduces product distortion in fal.ai-generated clips. And
+improved `/api/seo/generate-metadata`'s prompt with the document's real
+per-platform rules (YouTube title 14~16자, Reels hashtags capped at 5 per
+2026 policy, Naver Clip title ≤24자 and must include product name since it's
+search-driven, etc.) — **note this endpoint is still not called from any
+frontend component** (confirmed dead/unwired in the original audit); only the
+prompt content was improved, wiring it into `VideoPreviewPlayer` to replace
+the static local SEO templates there is a separate, not-yet-requested task.
+
+Verified with `npx tsc --noEmit` (clean). Committed to git — **not deployed**,
+deploy-batching rule still in effect (live site remains v1.0.2).
+
 ## Next session — pick up here
 
 1. **Ask before doing anything else**: does the user want to resume the
    API-key reorganization conversation, or just deploy what's already
-   committed (v1.0.3)? Don't assume — they explicitly deferred this.
+   committed (v1.0.3+)? Don't assume — they explicitly deferred this.
 2. **Still not done**: a real end-to-end walkthrough of the deployed site as
    an actual user (sign up → product → script → storyboard → audio →
    render → real playable MP4). Has never been exercised as a real user
@@ -326,6 +372,10 @@ asked to hold off deploying it too. **Do not deploy any of this until told to.**
 3. Once fal.ai is actually deployed, the AI video generation path in the
    storyboard step should get a real live test too (it's only ever hit the
    graceful no-key fallback so far).
+4. `/api/seo/generate-metadata` has a good prompt now but is still dead code
+   (unused by any frontend view) — if the user wants real per-platform SEO
+   metadata instead of `VideoPreviewPlayer`'s static local templates, wire it
+   up. Not yet confirmed as wanted; ask first.
 
 Lower-priority, not blocking:
 - Local `npm run dev` still can't render (no ffmpeg on this dev machine) —
