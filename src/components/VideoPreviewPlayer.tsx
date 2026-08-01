@@ -210,8 +210,9 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
           <h3 className="text-sm font-bold text-white">9:16 모바일 쇼츠 실시간 프리뷰</h3>
         </div>
 
-        {/* Smartphone Viewport Box (1080x1920 scaled) */}
-        <div className="w-[280px] h-[498px] bg-black rounded-3xl border-4 border-[#2d2948] overflow-hidden shadow-2xl relative flex flex-col justify-between select-none group">
+        {/* Smartphone Viewport Box (1080x1920 scaled) — width caps at 280px but shrinks to fit
+            narrow phones; aspect-ratio keeps the 9:16 proportions instead of a fixed height. */}
+        <div className="w-[min(280px,85vw)] aspect-[9/16] bg-black rounded-3xl border-4 border-[#2d2948] overflow-hidden shadow-2xl relative flex flex-col justify-between select-none group">
           {/* Top Overlay Badge */}
           <div className="absolute top-3 left-3 right-3 z-20 flex justify-between items-center text-[10px] text-white/80 font-mono">
             <span className="bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-full border border-white/20">
@@ -574,7 +575,7 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
               </div>
 
               {/* Platform Selector Tabs */}
-              <div className="grid grid-cols-4 gap-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                 {[
                   { id: 'shorts', name: '🔴 YouTube Shorts' },
                   { id: 'tiktok', name: '🎵 TikTok' },

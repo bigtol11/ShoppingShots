@@ -1,1 +1,6 @@
 @import "tailwindcss";
+
+@theme {
+  /* Extra-small breakpoint for hiding non-essential header text on very narrow phones */
+  --breakpoint-xs: 26rem;
+}

@@ -106,6 +106,7 @@ export default function App() {
   const [activeStep, setActiveStep] = useState<string>('trend');
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
   const [project, setProject] = useState<ProjectData>(DEFAULT_EMPTY_PROJECT);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const markStepCompleted = (stepId: string) => {
     if (!completedSteps.includes(stepId)) {
@@ -236,15 +237,6 @@ export default function App() {
     saveCompletedProject(completed);
   };
 
-  const mobileTabs = [
-    { id: 'trend', label: '1.트렌드', step: 'trend' },
-    { id: 'product', label: '2.상품', step: 'product' },
-    { id: 'script', label: '3.대본', step: 'script' },
-    { id: 'storyboard', label: '4.스토리보드', step: 'storyboard' },
-    { id: 'audio', label: '5.오디오', step: 'audio' },
-    { id: 'render', label: '6.렌더링', step: 'render' },
-  ];
-
   if (!isAuthChecked) {
     return <div className="min-h-screen w-full bg-[#0f0e17]" />;
   }
@@ -259,6 +251,7 @@ export default function App() {
         onLogout={handleLogout}
         onLogin={handleGoogleLogin}
         isLoggingIn={isLoggingIn}
+        onMenuClick={() => setIsSidebarOpen(true)}
       />
 
       {authError && (
@@ -274,9 +267,11 @@ export default function App() {
           setActiveStep={setActiveStep}
           completedSteps={completedSteps}
           sceneCount={project.scenes?.length || 0}
+          isMobileOpen={isSidebarOpen}
+          onMobileClose={() => setIsSidebarOpen(false)}
         />
 
-        <main className="flex-1 overflow-y-auto bg-[#0b0a12] pb-20 lg:pb-0 relative min-w-0 w-full overflow-x-hidden p-4 lg:p-6">
+        <main className="flex-1 overflow-y-auto bg-[#0b0a12] relative min-w-0 w-full overflow-x-hidden p-3 sm:p-4 lg:p-6">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeStep}
@@ -364,23 +359,6 @@ export default function App() {
           </AnimatePresence>
         </main>
       </div>
-
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-[#121020]/95 backdrop-blur-md border-t border-[#292446] z-50 flex items-center justify-around px-1 pb-safe">
-        {mobileTabs.map((tab) => {
-          const isActive = activeStep === tab.step;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveStep(tab.step)}
-              className={`flex flex-col items-center justify-center flex-1 h-full min-h-[48px] py-1 transition-all ${
-                isActive ? 'text-purple-400 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <span className="text-[10px] tracking-tight truncate max-w-[64px]">{tab.label}</span>
-            </button>
-          );
-        })}
-      </nav>
 
       <AnimatePresence>
         {validationWarning && (
