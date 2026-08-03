@@ -367,6 +367,23 @@ function getUserGeminiKey(req: express.Request): string | undefined {
   return key && typeof key === 'string' && key.trim().length > 0 ? key.trim() : undefined;
 }
 
+function getUserYoutubeKey(req: express.Request): string | undefined {
+  const key = (req.headers['x-youtube-key'] as string) || req.body?.youtubeKey;
+  const resolved = key && typeof key === 'string' && key.trim().length > 0 ? key.trim() : process.env.YOUTUBE_API_KEY;
+  return resolved && resolved.trim().length > 0 ? resolved.trim() : undefined;
+}
+
+// Parses ISO 8601 durations (e.g. "PT1M30S", "PT45S") into whole seconds — YouTube's
+// videos.list contentDetails.duration format.
+function parseIso8601DurationToSeconds(iso: string): number {
+  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso || '');
+  if (!match) return 0;
+  const hours = parseInt(match[1] || '0', 10);
+  const minutes = parseInt(match[2] || '0', 10);
+  const seconds = parseInt(match[3] || '0', 10);
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
 // 1. Chrome Extension Receiver / Raw Product JSON Parser API
 app.post('/api/extension-import', (req, res) => {
   try {
@@ -1287,6 +1304,75 @@ app.post('/api/generate-benchmark-reference-image', async (req, res) => {
   }
 });
 
+// Discovers recent, high-view YouTube Shorts for benchmarking (title/thumbnail/views/link
+// only — no video file is ever downloaded server-side; the user still acquires the file
+// themselves via their own means before using /api/analyze-benchmark-video). Uses the
+// official YouTube Data API v3, which explicitly supports this discovery use case.
+app.post('/api/youtube/search-shorts', async (req, res) => {
+  try {
+    const { query = '쇼핑 추천', publishedAfterDays = 14 } = req.body as { query?: string; publishedAfterDays?: number };
+    const apiKey = getUserYoutubeKey(req);
+    if (!apiKey) {
+      return res.status(503).json({ status: 'error', message: 'YouTube Data API 키가 설정되지 않았습니다. 설정 화면에서 키를 등록해 주세요.' });
+    }
+
+    const publishedAfter = new Date(Date.now() - publishedAfterDays * 24 * 60 * 60 * 1000).toISOString();
+    const searchUrl = new URL('https://www.googleapis.com/youtube/v3/search');
+    searchUrl.searchParams.set('part', 'snippet');
+    searchUrl.searchParams.set('q', `${query} shorts`);
+    searchUrl.searchParams.set('type', 'video');
+    searchUrl.searchParams.set('videoDuration', 'short');
+    searchUrl.searchParams.set('order', 'viewCount');
+    searchUrl.searchParams.set('publishedAfter', publishedAfter);
+    searchUrl.searchParams.set('maxResults', '15');
+    searchUrl.searchParams.set('key', apiKey);
+
+    const searchRes = await fetch(searchUrl.toString());
+    if (!searchRes.ok) {
+      const errBody = await searchRes.text();
+      console.error('[YouTube Search Error]', searchRes.status, errBody);
+      return res.status(searchRes.status === 403 ? 403 : 502).json({
+        status: 'error',
+        message: searchRes.status === 403 ? 'YouTube API 키가 유효하지 않거나 할당량을 초과했습니다.' : 'YouTube 검색에 실패했습니다.'
+      });
+    }
+    const searchData = await searchRes.json();
+    const videoIds: string[] = (searchData.items || []).map((item: any) => item.id?.videoId).filter(Boolean);
+    if (videoIds.length === 0) {
+      return res.json({ status: 'success', data: [] });
+    }
+
+    const detailsUrl = new URL('https://www.googleapis.com/youtube/v3/videos');
+    detailsUrl.searchParams.set('part', 'contentDetails,statistics,snippet');
+    detailsUrl.searchParams.set('id', videoIds.join(','));
+    detailsUrl.searchParams.set('key', apiKey);
+    const detailsRes = await fetch(detailsUrl.toString());
+    if (!detailsRes.ok) {
+      return res.status(502).json({ status: 'error', message: 'YouTube 영상 상세정보 조회에 실패했습니다.' });
+    }
+    const detailsData = await detailsRes.json();
+
+    const results = (detailsData.items || [])
+      .map((v: any) => ({
+        videoId: v.id,
+        title: v.snippet?.title || '',
+        channelTitle: v.snippet?.channelTitle || '',
+        thumbnailUrl: v.snippet?.thumbnails?.high?.url || v.snippet?.thumbnails?.default?.url || '',
+        publishedAt: v.snippet?.publishedAt || '',
+        viewCount: parseInt(v.statistics?.viewCount || '0', 10),
+        durationSec: parseIso8601DurationToSeconds(v.contentDetails?.duration || ''),
+        videoUrl: `https://www.youtube.com/watch?v=${v.id}`
+      }))
+      .filter((v: any) => v.durationSec > 0 && v.durationSec <= 180)
+      .sort((a: any, b: any) => b.viewCount - a.viewCount);
+
+    res.json({ status: 'success', data: results });
+  } catch (err: any) {
+    console.error('[YouTube Search Shorts Error]', err);
+    res.status(500).json({ status: 'error', message: 'YouTube 검색 요청이 실패했습니다.' });
+  }
+});
+
 app.post('/api/settings/validate-key', async (req, res) => {
   const { provider, apiKey } = req.body;
 
@@ -1334,6 +1420,21 @@ app.post('/api/settings/validate-key', async (req, res) => {
       } catch (geminiErr: any) {
         return res.status(401).json({ status: 'error', message: `Gemini API 키 인증에 실패했습니다: ${geminiErr?.message || ''}` });
       }
+    } else if (provider === 'youtube') {
+      const testUrl = new URL('https://www.googleapis.com/youtube/v3/search');
+      testUrl.searchParams.set('part', 'snippet');
+      testUrl.searchParams.set('q', 'test');
+      testUrl.searchParams.set('maxResults', '1');
+      testUrl.searchParams.set('key', apiKey);
+      const r = await fetch(testUrl.toString());
+      if (!r.ok) {
+        return res.status(401).json({ status: 'error', message: `YouTube Data API 키 인증에 실패했습니다. (HTTP ${r.status})` });
+      }
+      return res.json({
+        status: 'success',
+        provider: 'youtube',
+        message: 'YouTube Data API 키 실시간 인증 성공! 벤치마킹 검색 패널에 연동되었습니다.'
+      });
     }
   } catch (err: any) {
     return res.status(502).json({ status: 'error', message: '제공자 서버 연결에 실패했습니다: ' + (err?.message || '') });

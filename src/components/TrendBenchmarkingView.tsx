@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Flame, Sparkles, TrendingUp, ExternalLink, ArrowRight, Play, CheckCircle2, Search, Video, ChevronDown, X } from 'lucide-react';
+import { Flame, Sparkles, TrendingUp, ExternalLink, ArrowRight, Play, CheckCircle2, Search, Video, ChevronDown, X, Eye, Clock } from 'lucide-react';
 import { apiFetch } from '../utils/apiClient';
 
 interface TrendTopic {
@@ -12,6 +12,28 @@ interface TrendTopic {
   benchmark_url: string;
   recommended_keywords: string[];
 }
+
+interface YoutubeShortResult {
+  videoId: string;
+  title: string;
+  channelTitle: string;
+  thumbnailUrl: string;
+  publishedAt: string;
+  viewCount: number;
+  durationSec: number;
+  videoUrl: string;
+}
+
+const formatDaysAgo = (isoDate: string): string => {
+  const days = Math.floor((Date.now() - new Date(isoDate).getTime()) / (1000 * 60 * 60 * 24));
+  if (days <= 0) return '오늘';
+  return `${days}일 전`;
+};
+
+const formatViewCount = (n: number): string => {
+  if (n >= 10000) return `${(n / 10000).toFixed(1)}만`;
+  return n.toLocaleString();
+};
 
 interface TrendBenchmarkingViewProps {
   onSelectTopic: (topicTitle: string, keywords: string[]) => void;
@@ -66,6 +88,39 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
       setAutoError('실시간 추천 요청이 실패했습니다.');
     } finally {
       setIsAutoLoading(false);
+    }
+  };
+
+  // YouTube benchmarking search — official YouTube Data API, discovery only (no download
+  // built into the app; downloading videos violates YouTube's ToS regardless of downstream
+  // use, so the user acquires the file themselves and uploads it to the benchmark-video
+  // reverse-engineering feature in the storyboard step).
+  const [ytQuery, setYtQuery] = useState('');
+  const [ytResults, setYtResults] = useState<YoutubeShortResult[]>([]);
+  const [isYtLoading, setIsYtLoading] = useState(false);
+  const [ytError, setYtError] = useState<string | null>(null);
+  const [hasRunYtSearch, setHasRunYtSearch] = useState(false);
+
+  const handleSearchYoutube = async () => {
+    setIsYtLoading(true);
+    setYtError(null);
+    setHasRunYtSearch(true);
+    try {
+      const res = await apiFetch('/api/youtube/search-shorts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: ytQuery || category || '쇼핑 추천', publishedAfterDays: 14 })
+      });
+      const json = await res.json();
+      if (json.status === 'success' && Array.isArray(json.data)) {
+        setYtResults(json.data);
+      } else {
+        setYtError(json.message || 'YouTube 검색에 실패했습니다.');
+      }
+    } catch (err) {
+      setYtError('YouTube 검색 요청이 실패했습니다.');
+    } finally {
+      setIsYtLoading(false);
     }
   };
 
@@ -132,6 +187,8 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
         </div>
       </div>
 
+      {/* Split panel: real-time trend search (left) + YouTube benchmarking search (right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {/* Auto-Recommended Trends — real-time Google Search grounding, user-triggered only */}
       <div className="bg-gradient-to-br from-[#1a1530] to-[#18152b] border border-emerald-800/40 p-5 rounded-2xl space-y-4 shadow-lg">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -213,6 +270,77 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
             ))}
           </div>
         )}
+      </div>
+
+      {/* YouTube Benchmarking Search — discovery only, official YouTube Data API.
+          No download built in (violates YouTube ToS regardless of downstream use) —
+          the user acquires the video file themselves, then uploads it to the
+          "벤치마킹 영상으로 AI 재창조" feature in the storyboard step. */}
+      <div className="bg-gradient-to-br from-[#1a1530] to-[#18152b] border border-rose-800/40 p-5 rounded-2xl space-y-4 shadow-lg">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-bold text-white">📺 유튜브 벤치마킹 영상 검색</h3>
+        </div>
+
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={ytQuery}
+            onChange={(e) => setYtQuery(e.target.value)}
+            placeholder="검색어 (비우면 왼쪽 카테고리 사용)"
+            className="flex-1 bg-[#110e20] border border-[#342d59] rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"
+          />
+          <button
+            onClick={handleSearchYoutube}
+            disabled={isYtLoading}
+            className="bg-rose-700/80 hover:bg-rose-600 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all flex items-center space-x-1.5 shrink-0 disabled:opacity-50"
+          >
+            {isYtLoading ? <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+            <span>검색</span>
+          </button>
+        </div>
+
+        {!hasRunYtSearch ? (
+          <p className="text-xs text-slate-400 text-center py-6">
+            최근 2주 내 업로드된 쇼핑 숏폼 중 조회수 높은 순으로 보여드립니다.
+            다운로드는 지원하지 않습니다 — 유튜브 이용약관상 앱에서 대신 받아드릴 수 없어요.
+            영상을 직접 확보하신 뒤 스토리보드 단계의 "벤치마킹 영상으로 AI 재창조"에 업로드하세요.
+          </p>
+        ) : isYtLoading ? (
+          <div className="flex items-center justify-center py-8 space-x-2 text-slate-400 text-xs">
+            <div className="w-4 h-4 border-2 border-rose-500/30 border-t-rose-400 rounded-full animate-spin" />
+            <span>YouTube에서 검색 중...</span>
+          </div>
+        ) : ytError ? (
+          <div className="text-xs text-rose-300 bg-rose-950/40 border border-rose-800/50 rounded-xl p-3">
+            ⚠️ {ytError}
+          </div>
+        ) : ytResults.length === 0 ? (
+          <p className="text-xs text-slate-400 text-center py-6">검색 결과가 없습니다. 다른 검색어로 시도해 보세요.</p>
+        ) : (
+          <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+            {ytResults.map((v) => (
+              <a
+                key={v.videoId}
+                href={v.videoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center space-x-2.5 bg-[#120f23] border border-[#262045] hover:border-rose-600/60 rounded-xl p-2.5 transition-all"
+              >
+                <img src={v.thumbnailUrl} alt={v.title} className="w-16 h-16 rounded-lg object-cover shrink-0" />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="text-xs font-bold text-white leading-snug line-clamp-2">{v.title}</p>
+                  <p className="text-[10px] text-slate-400 truncate">{v.channelTitle}</p>
+                  <div className="flex items-center space-x-2 text-[10px] text-slate-500">
+                    <span className="flex items-center space-x-0.5"><Eye className="w-3 h-3" /><span>{formatViewCount(v.viewCount)}회</span></span>
+                    <span className="flex items-center space-x-0.5"><Clock className="w-3 h-3" /><span>{formatDaysAgo(v.publishedAt)}</span></span>
+                  </div>
+                </div>
+                <ExternalLink className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
       </div>
 
       {/* Input Controls */}

@@ -27,6 +27,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
   const [geminiKey, setGeminiKey] = useState('');
   const [typecastKey, setTypecastKey] = useState('');
   const [elevenlabsKey, setElevenlabsKey] = useState('');
+  const [youtubeKey, setYoutubeKey] = useState('');
 
   const [geminiStatus, setGeminiStatus] = useState<{ loading: boolean; message: string | null; isSuccess: boolean }>({
     loading: false,
@@ -41,6 +42,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
   });
 
   const [elevenlabsStatus, setElevenlabsStatus] = useState<{ loading: boolean; message: string | null; isSuccess: boolean }>({
+    loading: false,
+    message: null,
+    isSuccess: false
+  });
+
+  const [youtubeStatus, setYoutubeStatus] = useState<{ loading: boolean; message: string | null; isSuccess: boolean }>({
     loading: false,
     message: null,
     isSuccess: false
@@ -128,10 +135,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
     const savedGemini = localStorage.getItem('lucy_api_gemini_key') || '';
     const savedTypecast = localStorage.getItem('lucy_api_typecast_key') || '';
     const savedElevenLabs = localStorage.getItem('lucy_api_elevenlabs_key') || '';
+    const savedYoutube = localStorage.getItem('lucy_api_youtube_key') || '';
 
     setGeminiKey(savedGemini);
     setTypecastKey(savedTypecast);
     setElevenlabsKey(savedElevenLabs);
+    setYoutubeKey(savedYoutube);
 
     if (savedGemini) {
       setGeminiStatus({ loading: false, message: '내 Gemini API 키가 연동되어 있습니다.', isSuccess: true });
@@ -141,6 +150,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
     }
     if (savedElevenLabs) {
       setElevenlabsStatus({ loading: false, message: 'ElevenLabs API 키가 연동되어 있습니다.', isSuccess: true });
+    }
+    if (savedYoutube) {
+      setYoutubeStatus({ loading: false, message: 'YouTube Data API 키가 연동되어 있습니다.', isSuccess: true });
     }
 
     // Fetch server admin stats
@@ -153,10 +165,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
       .catch((err) => console.error(err));
   }, []);
 
-  const handleValidateKey = async (provider: 'gemini' | 'typecast' | 'elevenlabs') => {
-    const keyToValidate = provider === 'gemini' ? geminiKey : provider === 'typecast' ? typecastKey : elevenlabsKey;
-    const setStatus = provider === 'gemini' ? setGeminiStatus : provider === 'typecast' ? setTypecastStatus : setElevenlabsStatus;
-    const storageKey = provider === 'gemini' ? 'lucy_api_gemini_key' : provider === 'typecast' ? 'lucy_api_typecast_key' : 'lucy_api_elevenlabs_key';
+  const handleValidateKey = async (provider: 'gemini' | 'typecast' | 'elevenlabs' | 'youtube') => {
+    const keyMap = { gemini: geminiKey, typecast: typecastKey, elevenlabs: elevenlabsKey, youtube: youtubeKey };
+    const statusSetterMap = { gemini: setGeminiStatus, typecast: setTypecastStatus, elevenlabs: setElevenlabsStatus, youtube: setYoutubeStatus };
+    const storageKeyMap = {
+      gemini: 'lucy_api_gemini_key',
+      typecast: 'lucy_api_typecast_key',
+      elevenlabs: 'lucy_api_elevenlabs_key',
+      youtube: 'lucy_api_youtube_key'
+    };
+    const keyToValidate = keyMap[provider];
+    const setStatus = statusSetterMap[provider];
+    const storageKey = storageKeyMap[provider];
 
     if (!keyToValidate || keyToValidate.trim().length < 8) {
       setStatus({
@@ -413,6 +433,58 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
                     : 'bg-amber-950/60 border-amber-800/60 text-amber-300'
                 }`}>
                   {elevenlabsStatus.message}
+                </p>
+              )}
+            </div>
+
+            {/* YouTube Data API Key Card */}
+            <div className="bg-[#1a172e] border border-rose-800/40 p-4 rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-rose-300 block">4. YouTube Data API Key (벤치마킹 검색)</span>
+                  <span className="text-[11px] text-slate-400">1단계 트렌드 화면의 유튜브 벤치마킹 검색 패널에 사용 — Google Cloud Console에서 무료 발급</span>
+                </div>
+                {youtubeStatus.isSuccess ? (
+                  <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-bold flex items-center space-x-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    <span>연동 완료</span>
+                  </span>
+                ) : (
+                  <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded font-bold">
+                    미연동
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="password"
+                  value={youtubeKey}
+                  onChange={(e) => setYoutubeKey(e.target.value)}
+                  placeholder="YouTube Data API Key (AIza...)"
+                  className="flex-1 bg-[#100d21] border border-[#393163] focus:border-rose-500 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-600 outline-none font-mono"
+                />
+                <button
+                  onClick={() => handleValidateKey('youtube')}
+                  disabled={youtubeStatus.loading}
+                  className="bg-rose-600 hover:bg-rose-500 text-white font-bold px-3.5 py-2 rounded-lg text-xs transition flex items-center space-x-1 disabled:opacity-50 min-h-[36px]"
+                >
+                  {youtubeStatus.loading ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-rose-100" />
+                  ) : (
+                    <ShieldCheck className="w-3.5 h-3.5 text-rose-100" />
+                  )}
+                  <span>저장 & 검증</span>
+                </button>
+              </div>
+
+              {youtubeStatus.message && (
+                <p className={`text-[11px] font-mono p-2 rounded border ${
+                  youtubeStatus.isSuccess
+                    ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-300'
+                    : 'bg-amber-950/60 border-amber-800/60 text-amber-300'
+                }`}>
+                  {youtubeStatus.message}
                 </p>
               )}
             </div>

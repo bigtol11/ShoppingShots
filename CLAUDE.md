@@ -486,25 +486,74 @@ Verified with `npx tsc --noEmit` (clean), local dev boot, and curl smoke
 tests confirming both new routes are registered and auth-gated (401).
 **Real video analysis accuracy, Gemini Files API behavior with a real large
 MP4, and Cloud Run's request-size ceiling are all still unverified** — first
-real test needed after deploy.
+real test needed after deploy. **Not deployed yet as of end of this entry**
+(user was asked whether to deploy now vs. test locally first; conversation
+moved on to the v1.0.8 feature below before they answered — ask again).
+
+### v1.0.8 — YouTube benchmarking discovery panel (search only, no download)
+
+User asked to split the trend page's auto-recommend card into two panels and
+add a feature to list/download recent high-view YouTube/TikTok shopping
+shorts, explicitly so the downloaded file could feed the new v1.0.7
+reverse-engineering pipeline. **Split the ask**: built the discovery/listing
+half (legitimate — YouTube Data API v3 explicitly supports search+stats for
+this use case), **declined the download half again** — downloading video
+files from YouTube/TikTok violates their ToS regardless of what the
+downstream use is (this is a different problem from the earlier
+copyright-reuse issue, and applies even though the reverse-engineering
+pipeline itself is legitimate). Confirmed via `AskUserQuestion` before
+building that they wanted the discovery-only version; they did.
+
+- **`server.ts`**: `getUserYoutubeKey()` (BYOK, same pattern as
+  `getUserGeminiKey`, header `x-youtube-key` or `YOUTUBE_API_KEY` env
+  fallback) + `parseIso8601DurationToSeconds()`. New
+  `POST /api/youtube/search-shorts` — `search.list` (order by viewCount,
+  `publishedAfter` cutoff) then `videos.list` for real stats/duration,
+  filtered to ≤180s and re-sorted by view count. Only returns metadata
+  (title/thumbnail/channel/views/link) — **no video bytes ever touch the
+  server**. `/api/settings/validate-key` gained a `youtube` provider branch.
+- **`SettingsView.tsx`**: 4th key card "YouTube Data API Key", same
+  save/validate/clear pattern as the other three.
+- **`apiClient.ts`**: `apiFetch` now also attaches `x-youtube-key` from
+  localStorage.
+- **`TrendBenchmarkingView.tsx`**: the auto-recommend card is now the left
+  half of a `grid-cols-1 lg:grid-cols-2` split; right half is the new YouTube
+  panel (search box + results list, thumbnail/title/channel/views/days-ago,
+  each linking out to the real YouTube watch page — never a local file).
+  Explicit on-screen copy tells the user downloading isn't supported and to
+  upload their own file to the storyboard step's benchmark analyzer instead.
+
+Verified with `npx tsc --noEmit` (clean), local dev boot, curl smoke test
+confirming the new route is registered and auth-gated (401). **Real YouTube
+API behavior (quota, actual result quality) unverified** — needs a real
+YouTube Data API key from the user to test.
 
 ## Next session — pick up here
 
-1. **v1.0.7's benchmark-video pipeline is entirely untested with real data**
+1. **Nothing since v1.0.6 has been deployed** — v1.0.6 is live, but v1.0.7
+   (benchmark-video reverse-engineering) and v1.0.8 (YouTube discovery panel)
+   are both only committed locally. Ask whether to deploy before doing
+   anything else.
+2. **v1.0.7's benchmark-video pipeline is entirely untested with real data**
    — this is the most complex thing built so far (Gemini Files API + video
    understanding + a 2-stage fal.ai composite). Test with a real short MP4 +
    real product photo before trusting it.
-2. **Cloud Run request-size limit is unverified** — if a real benchmark video
+3. **Cloud Run request-size limit is unverified** — if a real benchmark video
    upload fails with a size/timeout error, the fix is likely either lowering
    client-side expectations (ask user to trim/compress first) or moving to a
    direct-to-Cloud-Storage upload flow instead of base64-through-Express.
-3. fal.ai is live (`FAL_KEY` deployed in v1.0.4) but the queue-polling fix
+4. **v1.0.8 needs a real YouTube Data API key to test** — user doesn't have
+   one registered yet as of this entry.
+5. fal.ai is live (`FAL_KEY` deployed in v1.0.4) but the queue-polling fix
    has never been exercised against the real API — first real test should
    happen via the bulk-generation button.
-4. If the video-download request comes up again, don't relitigate it from
-   scratch — see the v1.0.6/v1.0.7 session log entries above and the policy
-   note in the `shoppingshots-rebuild-v1` memory file.
-5. Still no real end-to-end walkthrough of the deployed site as an actual
+6. If a video-*download* request comes up again (from any platform), don't
+   relitigate it from scratch — see the v1.0.6/v1.0.7/v1.0.8 session log
+   entries above and the policy note in the `shoppingshots-rebuild-v1` memory
+   file. This has now been declined three separate times across two
+   different framings (direct reuse, and "just for reverse-engineering
+   input") — the ToS reasoning is independent of downstream use.
+7. Still no real end-to-end walkthrough of the deployed site as an actual
    user (sign up → product → script → storyboard → audio → render → real
    playable MP4) has been done end-to-end in one sitting.
 

@@ -4,7 +4,9 @@
 // the user hasn't configured one — see getUserGeminiKey() in server.ts.
 export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const geminiKey = localStorage.getItem('lucy_api_gemini_key') || '';
+  const youtubeKey = localStorage.getItem('lucy_api_youtube_key') || '';
   const headers = new Headers(options.headers || {});
   if (geminiKey) headers.set('x-gemini-key', geminiKey);
+  if (youtubeKey) headers.set('x-youtube-key', youtubeKey);
   return fetch(url, { ...options, headers });
 }
