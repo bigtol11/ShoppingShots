@@ -588,19 +588,18 @@ Investigated with an Explore agent before touching code:
 
 Verified with `npx tsc --noEmit` (clean), local dev boot, and curl smoke
 tests confirming `/api/settings/validate-key` and `/api/generate-tts` both
-still correctly 401 without auth.
+still correctly 401 without auth. **Deployed same session** (user said
+"지금 배포해주세요, 테스트 해보겠습니다") — revision `shoppingshots-00011-f75`,
+live bundle verified to report v1.0.9. This deploy carries v1.0.7
+(benchmark-video reverse-engineering) and v1.0.8 (YouTube discovery panel)
+live for the first time too, along with v1.0.9's fixes.
 
 ## Next session — pick up here
 
-1. **Nothing since v1.0.6 has been deployed** — v1.0.6 is live, but v1.0.7
-   (benchmark-video reverse-engineering), v1.0.8 (YouTube discovery panel),
-   and v1.0.9 (fal.ai BYOK, real ElevenLabs TTS, key-save bug fixes) are all
-   only committed locally. Ask whether to deploy before doing anything else.
-   v1.0.9 in particular directly fixes bugs the user actively hit, so it's
-   probably the most urgent to get live.
-1b. **v1.0.9's real ElevenLabs synthesis and fal.ai BYOK are both untested
-   against live APIs** — need a real ElevenLabs key + real fal.ai key from
-   the user to confirm end-to-end.
+1. **User is about to test v1.0.9 live** — the fal.ai BYOK conversion, real
+   ElevenLabs TTS, and the key-save session-expiry fix have never been
+   exercised against real APIs/real user sessions. Their test results are
+   the next input — don't assume anything worked until they report back.
 2. **v1.0.7's benchmark-video pipeline is entirely untested with real data**
    — this is the most complex thing built so far (Gemini Files API + video
    understanding + a 2-stage fal.ai composite). Test with a real short MP4 +
@@ -611,9 +610,9 @@ still correctly 401 without auth.
    direct-to-Cloud-Storage upload flow instead of base64-through-Express.
 4. **v1.0.8 needs a real YouTube Data API key to test** — user doesn't have
    one registered yet as of this entry.
-5. fal.ai is live (`FAL_KEY` deployed in v1.0.4) but the queue-polling fix
-   has never been exercised against the real API — first real test should
-   happen via the bulk-generation button.
+5. fal.ai queue-polling fix (from an earlier session) still hasn't been
+   exercised against the real API with a user-provided key — first real
+   test should happen via the bulk-generation button now that fal.ai is BYOK.
 6. If a video-*download* request comes up again (from any platform), don't
    relitigate it from scratch — see the v1.0.6/v1.0.7/v1.0.8 session log
    entries above and the policy note in the `shoppingshots-rebuild-v1` memory
