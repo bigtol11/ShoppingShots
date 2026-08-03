@@ -6,6 +6,7 @@ import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
+import Anthropic from '@anthropic-ai/sdk';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import cookieParser from 'cookie-parser';
@@ -367,6 +368,11 @@ function getUserGeminiKey(req: express.Request): string | undefined {
   return key && typeof key === 'string' && key.trim().length > 0 ? key.trim() : undefined;
 }
 
+function getUserClaudeKey(req: express.Request): string | undefined {
+  const key = (req.headers['x-claude-key'] as string) || req.body?.claudeApiKey || process.env.ANTHROPIC_API_KEY;
+  return key && typeof key === 'string' && key.trim().length > 0 ? key.trim() : undefined;
+}
+
 function getUserYoutubeKey(req: express.Request): string | undefined {
   const key = (req.headers['x-youtube-key'] as string) || req.body?.youtubeKey;
   const resolved = key && typeof key === 'string' && key.trim().length > 0 ? key.trim() : process.env.YOUTUBE_API_KEY;
@@ -710,8 +716,14 @@ const SCRIPT_STYLE_GUIDES: Record<string, string> = {
 
 app.post('/api/generate-scripts', async (req, res) => {
   try {
-    const { productFacts, targetDuration = 18, selectedStyle = '정보전달 쇼핑쇼츠', additionalInstructions = '' } = req.body;
-    const ai = getGeminiClient(getUserGeminiKey(req));
+    const {
+      productFacts,
+      targetDuration = 18,
+      selectedStyle = '정보전달 쇼핑쇼츠',
+      additionalInstructions = '',
+      aiProvider = 'claude',
+      claudeModel = 'claude-fable-5'
+    } = req.body;
     const styleGuide = SCRIPT_STYLE_GUIDES[selectedStyle] || SCRIPT_STYLE_GUIDES['정보전달 쇼핑쇼츠'];
     const targetChars = targetDuration <= 20 ? '150~200자' : '250~300자(최대 한도)';
 
@@ -752,6 +764,53 @@ ${additionalInstructions ? `10. 추가 지시사항(반드시 반영): ${additio
 JSON 형태로 각 대본의 id, title, style(항상 "${selectedStyle}"), target_duration_sec, hook_type, full_text, risk_notes, confidence_score를 응답하세요.
 `;
 
+    if (aiProvider === 'claude') {
+      const claudeKey = getUserClaudeKey(req);
+      if (!claudeKey) {
+        return res.status(503).json({ status: 'error', message: 'Claude API 키가 설정되지 않았습니다. 설정 화면에서 등록해 주세요.' });
+      }
+      const anthropic = new Anthropic({ apiKey: claudeKey });
+      const message = await anthropic.messages.create({
+        model: claudeModel,
+        max_tokens: 4096,
+        tools: [
+          {
+            name: 'return_scripts',
+            description: '생성된 쇼핑쇼츠 대본 3개를 구조화된 형태로 반환합니다.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                scripts: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      title: { type: 'string' },
+                      style: { type: 'string' },
+                      target_duration_sec: { type: 'number' },
+                      hook_type: { type: 'string' },
+                      full_text: { type: 'string' },
+                      risk_notes: { type: 'array', items: { type: 'string' } },
+                      confidence_score: { type: 'number' }
+                    },
+                    required: ['id', 'title', 'style', 'full_text', 'hook_type']
+                  }
+                }
+              },
+              required: ['scripts']
+            }
+          }
+        ],
+        tool_choice: { type: 'tool', name: 'return_scripts' },
+        messages: [{ role: 'user', content: prompt }]
+      });
+      const toolUse = message.content.find((c) => c.type === 'tool_use') as Anthropic.ToolUseBlock | undefined;
+      const scripts = (toolUse?.input as any)?.scripts || [];
+      return res.json({ status: 'success', data: scripts, aiProvider: 'claude', model: claudeModel });
+    }
+
+    const ai = getGeminiClient(getUserGeminiKey(req));
     const response = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
       contents: prompt,
@@ -778,7 +837,7 @@ JSON 형태로 각 대본의 id, title, style(항상 "${selectedStyle}"), target
     });
 
     const scripts = JSON.parse(response.text || '[]');
-    res.json({ status: 'success', data: scripts });
+    res.json({ status: 'success', data: scripts, aiProvider: 'gemini' });
   } catch (err: any) {
     console.error('[Generate Scripts Error]', err);
     res.json({
@@ -1443,6 +1502,20 @@ app.post('/api/settings/validate-key', async (req, res) => {
         provider: 'youtube',
         message: 'YouTube Data API 키 실시간 인증 성공! 벤치마킹 검색 패널에 연동되었습니다.'
       });
+    } else if (provider === 'claude') {
+      try {
+        const anthropic = new Anthropic({ apiKey });
+        // Cheapest/fastest model just to confirm the key works — independent of which
+        // model the user picks for actual script generation.
+        await anthropic.messages.create({ model: 'claude-haiku-4-5-20251001', max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] });
+        return res.json({
+          status: 'success',
+          provider: 'claude',
+          message: 'Claude API 키 실시간 인증 성공! 대본 생성에 사용됩니다.'
+        });
+      } catch (claudeErr: any) {
+        return res.status(401).json({ status: 'error', message: `Claude API 키 인증에 실패했습니다: ${claudeErr?.message || ''}` });
+      }
     }
   } catch (err: any) {
     return res.status(502).json({ status: 'error', message: '제공자 서버 연결에 실패했습니다: ' + (err?.message || '') });

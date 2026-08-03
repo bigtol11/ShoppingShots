@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ProductFacts, ScriptCandidate } from '../types';
 import { apiFetch } from '../utils/apiClient';
 import {
@@ -12,8 +12,16 @@ import {
   MessageSquare,
   Clock,
   ShieldCheck,
-  Check
+  Check,
+  Settings2
 } from 'lucide-react';
+
+const CLAUDE_MODEL_OPTIONS = [
+  { id: 'claude-fable-5', name: 'Fable 5', desc: '창작 글쓰기 전용 모델 (문체/톤/후킹에 최적, 추천)' },
+  { id: 'claude-opus-5', name: 'Opus 5', desc: '최상위 종합 성능 모델' },
+  { id: 'claude-sonnet-5', name: 'Sonnet 5', desc: '빠르고 균형 잡힌 성능' },
+  { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', desc: '가장 빠르고 저렴함' }
+];
 
 interface ScriptGeneratorViewProps {
   productInfo: ProductFacts;
@@ -39,6 +47,17 @@ export const ScriptGeneratorView: React.FC<ScriptGeneratorViewProps> = ({
   const [additionalInstructions, setAdditionalInstructions] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedScriptId, setCopiedScriptId] = useState<string | null>(null);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+
+  const [hasClaudeKey, setHasClaudeKey] = useState(false);
+  const [aiProvider, setAiProvider] = useState<'claude' | 'gemini'>('gemini');
+  const [claudeModel, setClaudeModel] = useState('claude-fable-5');
+
+  useEffect(() => {
+    const key = localStorage.getItem('lucy_api_claude_key');
+    setHasClaudeKey(Boolean(key));
+    if (key) setAiProvider('claude');
+  }, []);
 
   const styleOptions = [
     {
@@ -90,6 +109,7 @@ export const ScriptGeneratorView: React.FC<ScriptGeneratorViewProps> = ({
 
   const handleGenerateScript = async () => {
     setIsGenerating(true);
+    setGenerationError(null);
     try {
       const response = await apiFetch('/api/generate-scripts', {
         method: 'POST',
@@ -98,11 +118,17 @@ export const ScriptGeneratorView: React.FC<ScriptGeneratorViewProps> = ({
           productFacts: productInfo,
           targetDuration,
           selectedStyle,
-          additionalInstructions
+          additionalInstructions,
+          aiProvider,
+          claudeModel
         })
       });
 
       const data = await response.json();
+      if (data?.status === 'error') {
+        setGenerationError(data.message || '대본 생성에 실패했습니다.');
+        return;
+      }
       if (data?.data && Array.isArray(data.data)) {
         onUpdateScripts(data.data);
         if (data.data.length > 0) {
@@ -111,6 +137,7 @@ export const ScriptGeneratorView: React.FC<ScriptGeneratorViewProps> = ({
       }
     } catch (err) {
       console.error(err);
+      setGenerationError('대본 생성 요청이 실패했습니다.');
     } finally {
       setIsGenerating(false);
     }
@@ -226,6 +253,64 @@ export const ScriptGeneratorView: React.FC<ScriptGeneratorViewProps> = ({
               />
             </div>
 
+            {/* AI Provider & Model Selector */}
+            <div className="space-y-2 bg-[#121020] border border-[#272342] p-3 rounded-xl">
+              <div className="flex items-center space-x-1.5">
+                <Settings2 className="w-3.5 h-3.5 text-purple-400" />
+                <span className="text-xs font-bold text-slate-200">대본 작성 AI</span>
+              </div>
+
+              <div className="flex bg-[#0e0c18] p-1 rounded-lg border border-[#272342]">
+                <button
+                  onClick={() => setAiProvider('claude')}
+                  disabled={!hasClaudeKey}
+                  className={`flex-1 text-xs py-1.5 rounded-md font-bold transition ${
+                    aiProvider === 'claude' ? 'bg-orange-600 text-white' : 'text-slate-400 hover:text-white disabled:opacity-40 disabled:hover:text-slate-400'
+                  }`}
+                >
+                  Claude
+                </button>
+                <button
+                  onClick={() => setAiProvider('gemini')}
+                  className={`flex-1 text-xs py-1.5 rounded-md font-bold transition ${
+                    aiProvider === 'gemini' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Gemini
+                </button>
+              </div>
+
+              {!hasClaudeKey && (
+                <p className="text-[10px] text-amber-300">Claude로 대본을 쓰려면 설정에서 Claude API 키를 먼저 등록하세요.</p>
+              )}
+
+              {aiProvider === 'claude' && hasClaudeKey && (
+                <div className="grid grid-cols-2 gap-1.5 pt-1">
+                  {CLAUDE_MODEL_OPTIONS.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => setClaudeModel(m.id)}
+                      title={m.desc}
+                      className={`p-1.5 rounded-lg border text-left text-[10px] font-bold transition ${
+                        claudeModel === m.id
+                          ? 'bg-orange-950 border-orange-600 text-orange-200'
+                          : 'bg-[#110e1e] border-[#292446] text-slate-400 hover:border-orange-800'
+                      }`}
+                    >
+                      {m.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {generationError && (
+              <div className="p-2.5 bg-rose-950/60 border border-rose-800/60 rounded-xl text-xs text-rose-200 flex items-start space-x-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <span>{generationError}</span>
+              </div>
+            )}
+
             {/* Generate Button */}
             <button
               onClick={handleGenerateScript}
@@ -235,7 +320,7 @@ export const ScriptGeneratorView: React.FC<ScriptGeneratorViewProps> = ({
               {isGenerating ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>대본 3안 생성 중 (Gemini 3.6 Flash)...</span>
+                  <span>대본 3안 생성 중 ({aiProvider === 'claude' ? CLAUDE_MODEL_OPTIONS.find((m) => m.id === claudeModel)?.name : 'Gemini 3.6 Flash'})...</span>
                 </>
               ) : (
                 <>

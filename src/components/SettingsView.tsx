@@ -28,6 +28,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
   const [typecastKey, setTypecastKey] = useState('');
   const [elevenlabsKey, setElevenlabsKey] = useState('');
   const [youtubeKey, setYoutubeKey] = useState('');
+  const [claudeKey, setClaudeKey] = useState('');
   const [myFalKey, setMyFalKey] = useState('');
   const [myFalStatus, setMyFalStatus] = useState<{ loading: boolean; message: string | null; isSuccess: boolean }>({
     loading: false,
@@ -54,6 +55,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
   });
 
   const [youtubeStatus, setYoutubeStatus] = useState<{ loading: boolean; message: string | null; isSuccess: boolean }>({
+    loading: false,
+    message: null,
+    isSuccess: false
+  });
+
+  const [claudeStatus, setClaudeStatus] = useState<{ loading: boolean; message: string | null; isSuccess: boolean }>({
     loading: false,
     message: null,
     isSuccess: false
@@ -143,14 +150,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
     const savedElevenLabs = localStorage.getItem('lucy_api_elevenlabs_key') || '';
     const savedYoutube = localStorage.getItem('lucy_api_youtube_key') || '';
     const savedMyFal = localStorage.getItem('lucy_api_fal_key') || '';
+    const savedClaude = localStorage.getItem('lucy_api_claude_key') || '';
 
     setGeminiKey(savedGemini);
     setTypecastKey(savedTypecast);
     setElevenlabsKey(savedElevenLabs);
     setYoutubeKey(savedYoutube);
     setMyFalKey(savedMyFal);
+    setClaudeKey(savedClaude);
     if (savedMyFal) {
       setMyFalStatus({ loading: false, message: '내 fal.ai 키가 연동되어 있습니다.', isSuccess: true });
+    }
+    if (savedClaude) {
+      setClaudeStatus({ loading: false, message: 'Claude API 키가 연동되어 있습니다.', isSuccess: true });
     }
 
     if (savedGemini) {
@@ -176,14 +188,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
       .catch((err) => console.error(err));
   }, []);
 
-  const handleValidateKey = async (provider: 'gemini' | 'typecast' | 'elevenlabs' | 'youtube') => {
-    const keyMap = { gemini: geminiKey, typecast: typecastKey, elevenlabs: elevenlabsKey, youtube: youtubeKey };
-    const statusSetterMap = { gemini: setGeminiStatus, typecast: setTypecastStatus, elevenlabs: setElevenlabsStatus, youtube: setYoutubeStatus };
+  const handleValidateKey = async (provider: 'gemini' | 'typecast' | 'elevenlabs' | 'youtube' | 'claude') => {
+    const keyMap = { gemini: geminiKey, typecast: typecastKey, elevenlabs: elevenlabsKey, youtube: youtubeKey, claude: claudeKey };
+    const statusSetterMap = { gemini: setGeminiStatus, typecast: setTypecastStatus, elevenlabs: setElevenlabsStatus, youtube: setYoutubeStatus, claude: setClaudeStatus };
     const storageKeyMap = {
       gemini: 'lucy_api_gemini_key',
       typecast: 'lucy_api_typecast_key',
       elevenlabs: 'lucy_api_elevenlabs_key',
-      youtube: 'lucy_api_youtube_key'
+      youtube: 'lucy_api_youtube_key',
+      claude: 'lucy_api_claude_key'
     };
     const keyToValidate = keyMap[provider];
     const setStatus = statusSetterMap[provider];
@@ -581,6 +594,58 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
                     : 'bg-amber-950/60 border-amber-800/60 text-amber-300'
                 }`}>
                   {myFalStatus.message}
+                </p>
+              )}
+            </div>
+
+            {/* Claude API Key Card */}
+            <div className="bg-[#1a172e] border border-orange-800/40 p-4 rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-orange-300 block">6. Claude API Key (대본 작성)</span>
+                  <span className="text-[11px] text-slate-400">3단계 대본 생성에 사용 — 등록하면 대본 생성 시 Claude 모델을 선택할 수 있습니다</span>
+                </div>
+                {claudeStatus.isSuccess ? (
+                  <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-bold flex items-center space-x-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    <span>연동 완료</span>
+                  </span>
+                ) : (
+                  <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded font-bold">
+                    미등록 (Gemini로 대본 생성)
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="password"
+                  value={claudeKey}
+                  onChange={(e) => setClaudeKey(e.target.value)}
+                  placeholder="Claude API Key (sk-ant-...)"
+                  className="flex-1 bg-[#100d21] border border-[#393163] focus:border-orange-500 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-600 outline-none font-mono"
+                />
+                <button
+                  onClick={() => handleValidateKey('claude')}
+                  disabled={claudeStatus.loading}
+                  className="bg-orange-600 hover:bg-orange-500 text-white font-bold px-3.5 py-2 rounded-lg text-xs transition flex items-center space-x-1 disabled:opacity-50 min-h-[36px]"
+                >
+                  {claudeStatus.loading ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-orange-100" />
+                  ) : (
+                    <ShieldCheck className="w-3.5 h-3.5 text-orange-100" />
+                  )}
+                  <span>저장 & 검증</span>
+                </button>
+              </div>
+
+              {claudeStatus.message && (
+                <p className={`text-[11px] font-mono p-2 rounded border ${
+                  claudeStatus.isSuccess
+                    ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-300'
+                    : 'bg-amber-950/60 border-amber-800/60 text-amber-300'
+                }`}>
+                  {claudeStatus.message}
                 </p>
               )}
             </div>

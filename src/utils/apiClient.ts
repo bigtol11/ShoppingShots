@@ -6,9 +6,11 @@ export async function apiFetch(url: string, options: RequestInit = {}): Promise<
   const geminiKey = localStorage.getItem('lucy_api_gemini_key') || '';
   const youtubeKey = localStorage.getItem('lucy_api_youtube_key') || '';
   const falKey = localStorage.getItem('lucy_api_fal_key') || '';
+  const claudeKey = localStorage.getItem('lucy_api_claude_key') || '';
   const headers = new Headers(options.headers || {});
   if (geminiKey) headers.set('x-gemini-key', geminiKey);
   if (youtubeKey) headers.set('x-youtube-key', youtubeKey);
   if (falKey) headers.set('x-fal-key', falKey);
+  if (claudeKey) headers.set('x-claude-key', claudeKey);
   return fetch(url, { ...options, headers });
 }

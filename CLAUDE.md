@@ -594,9 +594,58 @@ live bundle verified to report v1.0.9. This deploy carries v1.0.7
 (benchmark-video reverse-engineering) and v1.0.8 (YouTube discovery panel)
 live for the first time too, along with v1.0.9's fixes.
 
+### v1.1.0 — Claude added as a script-writing provider (model-selectable)
+
+User asked which model the app used for scripts, then asked (separately,
+after a live web search comparing 2026 model quality for creative writing)
+to switch script generation to Claude instead of Gemini. Discussed Fable 5
+(Anthropic's purpose-built creative-writing model, tops 2026 benchmarks for
+prose voice/subtext/character work) vs Opus 5 (flagship generalist,
+credits similar to Opus 4.8) — recommended Fable 5 specifically because
+script writing is squarely the creative-prose task it's tuned for, while
+Opus 5's edge is complex reasoning/coding. User agreed, and asked for full
+model choice (not just a fixed default) plus a new Claude API key field.
+
+- **`server.ts`**: `npm install @anthropic-ai/sdk`. New `getUserClaudeKey()`
+  (BYOK, header `x-claude-key`, falls back to `ANTHROPIC_API_KEY` env var).
+  `/api/generate-scripts` now takes `aiProvider: 'claude' | 'gemini'` +
+  `claudeModel` — the exact same prompt string is reused for both providers
+  (no duplicated prompt-engineering), branching only at the API call level.
+  Claude has no native `responseSchema` like Gemini's — used **forced
+  tool-use** instead (`tools: [{name, input_schema}], tool_choice: {type:
+  'tool', name}}`), which is the standard Anthropic-SDK pattern for
+  structured JSON output; the script array comes back as the tool call's
+  `input.scripts`. Default provider is `'claude'` server-side, but the
+  client only selects it when a key is actually registered. `claude`
+  provider branch added to `/api/settings/validate-key` (validates via a
+  1-token `claude-haiku-4-5-20251001` call — cheapest way to confirm a key
+  works, independent of which model the user picks for real generation).
+- **`SettingsView.tsx`**: 6th key card, same save/validate/clear pattern as
+  the others.
+- **`ScriptGeneratorView.tsx`**: new "대본 작성 AI" selector — Claude/Gemini
+  toggle (Claude disabled until a key exists) + a 4-way Claude model picker
+  (Fable 5 / Opus 5 / Sonnet 5 / Haiku 4.5, Fable 5 default) shown only when
+  Claude is selected. Generation errors now surface inline instead of
+  failing silently.
+- **`apiClient.ts`**: attaches `x-claude-key` alongside the existing
+  gemini/youtube/fal headers.
+- **`.env.example`**: documented `ANTHROPIC_API_KEY` and `YOUTUBE_API_KEY`
+  as optional shared fallbacks (both are BYOK-first now).
+
+Verified with `npx tsc --noEmit` (clean), local dev boot, curl smoke tests
+confirming `/api/generate-scripts` and the `claude` validate-key branch are
+both still 401-gated. **Real Claude API calls (all 4 models) are completely
+untested** — needs a real Anthropic key from the user to confirm the
+tool-use JSON extraction actually works end-to-end, not just that it
+compiles.
+
 ## Next session — pick up here
 
-1. **User is about to test v1.0.9 live** — the fal.ai BYOK conversion, real
+1. **v1.1.0's Claude integration has never made a real API call** — the
+   forced tool-use JSON extraction pattern is standard but unverified
+   against the actual Anthropic API in this codebase. Test with a real key
+   across at least Fable 5 and one other model before trusting it.
+2. **User is about to test v1.0.9 live** — the fal.ai BYOK conversion, real
    ElevenLabs TTS, and the key-save session-expiry fix have never been
    exercised against real APIs/real user sessions. Their test results are
    the next input — don't assume anything worked until they report back.
