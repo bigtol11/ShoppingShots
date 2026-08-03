@@ -1691,6 +1691,12 @@ app.get('/api/tts/typecast/actors', async (req, res) => {
       provider: 'typecast',
       gender: v.gender === 'female' ? '여성' : v.gender === 'male' ? '남성' : '혼성',
       style: [v.age, ...(Array.isArray(v.use_cases) ? v.use_cases : [])].filter(Boolean).join(' · ') || 'Typecast AI Voice',
+      // Raw enum values (Typecast's own real taxonomy, confirmed via live API testing) —
+      // kept separately from the display-formatted fields above so the frontend can filter
+      // by them the same way typecast.ai's own voice picker does (gender/age/use-case chips).
+      genderRaw: v.gender || '',
+      ageGroup: v.age || '',
+      useCases: Array.isArray(v.use_cases) ? v.use_cases : [],
       // Real, non-empty Korean sample text — the previous empty string meant every preview
       // request synthesized zero characters and silently failed for every real voice.
       sample: '안녕하세요! 이 목소리로 쇼핑쇼츠 나레이션을 제작해 보세요.',

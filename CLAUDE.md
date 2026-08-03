@@ -858,6 +858,31 @@ custom` fetch and the non-empty sample fix are both mechanically verified
 against the real Typecast API; only the specific "does MY clone show up"
 question needs the user's own key to fully confirm end-to-end.
 
+### v1.1.6 — Typecast voice picker: gender/age/use-case filter chips (Typecast's own taxonomy)
+
+User asked (before deploying v1.1.5) to replicate typecast.ai's own voice
+browsing filters — gender/age/category — and explicitly asked for a
+professional opinion before implementing. Recommended proceeding: pulled
+the full real taxonomy from the same live API data already used to
+diagnose v1.1.5 (not guessed) — **gender**: `male`/`female`; **age**:
+`child`/`teenager`/`young_adult`/`middle_age`/`elder`; **use_cases** (12,
+exact strings from the API): `Ads/Promotion`, `Anime`, `Announcer`,
+`Audiobook/Storytelling`, `Conversational`, `Documentary`, `Game`, `News
+Reporter`, `Radio/Podcast`, `Rapper`, `TikTok/Reels/Shorts`, `Voicemail/
+Voice Assistant`. All of this was already present in the API response —
+no new integration needed, just wasn't being exposed/used for filtering.
+
+- **`server.ts`**: `/api/tts/typecast/actors` now also returns raw
+  `genderRaw`, `ageGroup`, `useCases[]` per actor (previously only the
+  Korean-formatted display versions were kept).
+- **`AudioStudioView.tsx`**: `TYPECAST_AGE_LABELS`/`TYPECAST_USE_CASE_LABELS`
+  Korean translation maps; three single-select filter chip rows (성별/연령/
+  용도) above the search box, combined via `filteredTypecastActors` (AND
+  logic across all active filters + name search) which now feeds the
+  dropdown instead of the raw list. Shows a live "N명 표시 중" count.
+
+Verified with `npx tsc --noEmit` (clean), local dev boot.
+
 ## Next session — pick up here
 
 1. **v1.1.5's Typecast fixes need real-account confirmation** — preview

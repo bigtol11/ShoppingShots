@@ -20,6 +20,32 @@ import {
   RotateCcw
 } from 'lucide-react';
 
+// Typecast's own real taxonomy for filtering their voice catalog (confirmed against the
+// live API — not guessed), so the picker can be narrowed the same way typecast.ai's own
+// site lets you browse: by gender, age group, and use-case tag.
+const TYPECAST_AGE_LABELS: Record<string, string> = {
+  child: '아동',
+  teenager: '청소년',
+  young_adult: '청년',
+  middle_age: '중년',
+  elder: '장년'
+};
+
+const TYPECAST_USE_CASE_LABELS: Record<string, string> = {
+  'Ads/Promotion': '광고/마케팅',
+  'Anime': '애니메이션',
+  'Announcer': '아나운서',
+  'Audiobook/Storytelling': '오디오북',
+  'Conversational': '대화체',
+  'Documentary': '다큐멘터리',
+  'Game': '게임',
+  'News Reporter': '뉴스',
+  'Radio/Podcast': '라디오/팟캐스트',
+  'Rapper': '랩/힙합',
+  'TikTok/Reels/Shorts': '쇼츠/릴스',
+  'Voicemail/Voice Assistant': '음성비서'
+};
+
 interface AudioStudioViewProps {
   audioConfig: AudioConfig;
   scenes: SceneItem[];
@@ -52,6 +78,17 @@ export const AudioStudioView: React.FC<AudioStudioViewProps> = ({
   const [typecastActors, setTypecastActors] = useState<any[]>([]);
   const [elevenlabsVoices, setElevenlabsVoices] = useState<any[]>([]);
   const [typecastSearchQuery, setTypecastSearchQuery] = useState('');
+  const [typecastGenderFilter, setTypecastGenderFilter] = useState<string>('all');
+  const [typecastAgeFilter, setTypecastAgeFilter] = useState<string>('all');
+  const [typecastUseCaseFilter, setTypecastUseCaseFilter] = useState<string>('all');
+
+  const filteredTypecastActors = typecastActors.filter((a) => {
+    if (typecastGenderFilter !== 'all' && a.genderRaw !== typecastGenderFilter) return false;
+    if (typecastAgeFilter !== 'all' && a.ageGroup !== typecastAgeFilter) return false;
+    if (typecastUseCaseFilter !== 'all' && !(a.useCases || []).includes(typecastUseCaseFilter)) return false;
+    if (typecastSearchQuery && !a.name.toLowerCase().includes(typecastSearchQuery.toLowerCase())) return false;
+    return true;
+  });
 
   const fetchVoices = async () => {
     const tcKey = localStorage.getItem('lucy_api_typecast_key');
@@ -461,13 +498,78 @@ export const AudioStudioView: React.FC<AudioStudioViewProps> = ({
 
                 {hasTypecastKey && typecastActors.length > 0 ? (
                   <div className="space-y-2 pt-1">
+                    {/* Filter chips — same gender/age/use-case facets typecast.ai's own voice
+                        picker uses, built from the real fields the API already returns. */}
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap gap-1">
+                        {[{ id: 'all', label: '전체' }, { id: 'male', label: '남성' }, { id: 'female', label: '여성' }].map((opt) => (
+                          <button
+                            key={opt.id}
+                            onClick={() => setTypecastGenderFilter(opt.id)}
+                            className={`text-[10px] font-bold px-2 py-1 rounded-full border transition ${
+                              typecastGenderFilter === opt.id
+                                ? 'bg-purple-600 border-purple-400 text-white'
+                                : 'bg-[#0e0c18] border-[#2e2850] text-slate-400 hover:border-purple-700'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          onClick={() => setTypecastAgeFilter('all')}
+                          className={`text-[10px] font-bold px-2 py-1 rounded-full border transition ${
+                            typecastAgeFilter === 'all' ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-[#0e0c18] border-[#2e2850] text-slate-400 hover:border-indigo-700'
+                          }`}
+                        >
+                          연령 전체
+                        </button>
+                        {Object.entries(TYPECAST_AGE_LABELS).map(([key, label]) => (
+                          <button
+                            key={key}
+                            onClick={() => setTypecastAgeFilter(key)}
+                            className={`text-[10px] font-bold px-2 py-1 rounded-full border transition ${
+                              typecastAgeFilter === key ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-[#0e0c18] border-[#2e2850] text-slate-400 hover:border-indigo-700'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          onClick={() => setTypecastUseCaseFilter('all')}
+                          className={`text-[10px] font-bold px-2 py-1 rounded-full border transition ${
+                            typecastUseCaseFilter === 'all' ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-[#0e0c18] border-[#2e2850] text-slate-400 hover:border-emerald-700'
+                          }`}
+                        >
+                          용도 전체
+                        </button>
+                        {Object.entries(TYPECAST_USE_CASE_LABELS).map(([key, label]) => (
+                          <button
+                            key={key}
+                            onClick={() => setTypecastUseCaseFilter(key)}
+                            className={`text-[10px] font-bold px-2 py-1 rounded-full border transition ${
+                              typecastUseCaseFilter === key ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-[#0e0c18] border-[#2e2850] text-slate-400 hover:border-emerald-700'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     <input
                       type="text"
                       value={typecastSearchQuery}
                       onChange={(e) => setTypecastSearchQuery(e.target.value)}
-                      placeholder={`성우 이름으로 검색 (전체 ${typecastActors.length}명)`}
+                      placeholder="성우 이름으로 검색"
                       className="w-full bg-[#0e0c18] border border-[#2e2850] rounded-lg px-2.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
                     />
+                    <p className="text-[10px] text-slate-500">
+                      {filteredTypecastActors.length}명 표시 중 (전체 {typecastActors.length}명)
+                    </p>
 
                     <select
                       value={audioConfig.voice_provider === 'typecast' ? audioConfig.voice_id : ''}
@@ -485,18 +587,18 @@ export const AudioStudioView: React.FC<AudioStudioViewProps> = ({
                       className="w-full bg-[#18152b] border border-[#2e2850] rounded-lg px-2.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
                     >
                       <option value="" disabled>성우를 선택하세요</option>
-                      {typecastActors.filter((a) => a.isCustomClone).length > 0 && (
+                      {filteredTypecastActors.filter((a) => a.isCustomClone).length > 0 && (
                         <optgroup label="🎙️ 내 클론 보이스">
-                          {typecastActors
-                            .filter((a) => a.isCustomClone && a.name.toLowerCase().includes(typecastSearchQuery.toLowerCase()))
+                          {filteredTypecastActors
+                            .filter((a) => a.isCustomClone)
                             .map((a) => (
                               <option key={a.id} value={a.id}>{a.name} ({a.gender})</option>
                             ))}
                         </optgroup>
                       )}
-                      <optgroup label={`타입캐스트 성우 라이브러리 (${typecastActors.filter((a) => !a.isCustomClone).length}명)`}>
-                        {typecastActors
-                          .filter((a) => !a.isCustomClone && a.name.toLowerCase().includes(typecastSearchQuery.toLowerCase()))
+                      <optgroup label={`타입캐스트 성우 라이브러리 (${filteredTypecastActors.filter((a) => !a.isCustomClone).length}명)`}>
+                        {filteredTypecastActors
+                          .filter((a) => !a.isCustomClone)
                           .map((a) => (
                             <option key={a.id} value={a.id}>{a.name} ({a.gender}, {a.style})</option>
                           ))}
