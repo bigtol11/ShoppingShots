@@ -176,6 +176,18 @@ export default function App() {
     }
   };
 
+  // Used only by the benchmark-video reverse-engineering flow: script + scenes were just
+  // constructed together in the same handler and are known-valid, so this jumps straight to
+  // audio instead of going through handleNextStepFrom('storyboard') — which re-validates
+  // against `project` state that's still stale at this point in the same event handler
+  // (setProject from the scripts/scenes updates hasn't re-rendered yet), and would
+  // incorrectly show a "no script selected" warning right after applying one.
+  const handleBenchmarkFlowComplete = () => {
+    markStepCompleted('script');
+    markStepCompleted('storyboard');
+    setActiveStep('audio');
+  };
+
   // State handlers
   const handleUpdateProductInfo = (newInfo: ProductFacts) => {
     setProject((prev) => ({
@@ -338,6 +350,9 @@ export default function App() {
                   scriptText={project.scripts.find((s) => s.id === project.selectedScriptId)?.full_text}
                   targetDuration={project.targetDuration}
                   productName={project.productInfo.product_name}
+                  onUpdateScripts={handleUpdateScripts}
+                  onSelectScript={handleSelectScript}
+                  onBenchmarkFlowComplete={handleBenchmarkFlowComplete}
                 />
               )}
 

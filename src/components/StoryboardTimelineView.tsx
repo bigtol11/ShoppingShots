@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { SceneItem, ClipCandidate, SourceGrade } from '../types';
+import { SceneItem, ClipCandidate, SourceGrade, ScriptCandidate } from '../types';
 import { apiFetch } from '../utils/apiClient';
 import { BenchmarkVideoAnalyzerView } from './BenchmarkVideoAnalyzerView';
 import {
@@ -34,6 +34,12 @@ interface StoryboardTimelineViewProps {
   scriptText?: string;
   targetDuration?: number;
   productName?: string;
+  // Only used by the benchmark-video reverse-engineering flow, which synthesizes its own
+  // matching script from the analyzed narration instead of depending on whatever was
+  // separately selected in step 3 — reuses App.tsx's existing script handlers as-is.
+  onUpdateScripts?: (scripts: ScriptCandidate[]) => void;
+  onSelectScript?: (script: ScriptCandidate) => void;
+  onBenchmarkFlowComplete?: () => void;
 }
 
 export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
@@ -43,6 +49,9 @@ export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
   onNextStep,
   scriptText,
   targetDuration = 18,
+  onUpdateScripts,
+  onSelectScript,
+  onBenchmarkFlowComplete,
   productName
 }) => {
   const [isBenchmarkAnalyzerOpen, setIsBenchmarkAnalyzerOpen] = useState(false);
@@ -460,10 +469,16 @@ export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
         <BenchmarkVideoAnalyzerView
           productName={productName}
           onClose={() => setIsBenchmarkAnalyzerOpen(false)}
-          onApply={(newScenes) => {
+          onApply={(newScenes, script) => {
+            // Synthesized script + scenes both come from the same benchmark analysis pass,
+            // so they're applied together and the user is taken straight to the audio step —
+            // both 3단계(대본) and 4단계(스토리보드) are already complete and consistent.
+            onUpdateScripts?.([script]);
+            onSelectScript?.(script);
             onUpdateScenes(newScenes);
             setSelectedSceneId(newScenes[0]?.scene_id || selectedSceneId);
             setIsBenchmarkAnalyzerOpen(false);
+            onBenchmarkFlowComplete?.();
           }}
         />
       )}

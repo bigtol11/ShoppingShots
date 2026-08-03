@@ -883,9 +883,71 @@ no new integration needed, just wasn't being exposed/used for filtering.
 
 Verified with `npx tsc --noEmit` (clean), local dev boot.
 
+### v1.1.7 — Benchmark-video reverse-engineering becomes a self-consistent independent track
+
+User caught a real design flaw: "벤치마킹 영상으로 AI 재창조" (v1.0.7) was wired into step 4
+(storyboard) as if it were just another way to fill in scenes for an *already-selected*
+step-3 script — but the benchmark video's own length/tone/cut-count has no relationship to
+whatever script was separately generated in step 3, so the two would routinely conflict on
+duration and tone. This was visible in the code itself
+(`BenchmarkVideoAnalyzerView.tsx` previously hardcoded scene narration to a placeholder:
+*"나레이션을 입력하거나 3단계에서 선택한 대본을 참고해 채워주세요."*). User also asked for
+film/short-drama-level precision: exact shot-size/camera-movement vocabulary and
+cut-to-cut visual continuity analysis, not independent per-cut snapshots.
+
+Planned via Plan Mode given the architectural scope (approved plan documents both parts in
+full). **Approach**: rather than relocating the UI, made the flow *self-consistent* — the
+benchmark analysis now generates real per-cut narration and a synthesized `ScriptCandidate`
+gets created and applied alongside the scenes in one action, so 3단계 and 4단계 always come
+from the same source and can never drift out of sync again.
+
+- **`server.ts`**: `BENCHMARK_ANALYSIS_GUARDRAIL` and `/api/analyze-benchmark-video`'s schema
+  extended — new fields `narration_text` (real broadcastable narration per cut, product-name
+  omission rule reused from `/api/generate-scripts`, budgeted at
+  `suggested_duration_sec × 5~6자`, last cut ends with a comment/save-bait CTA),
+  `subtitle_text`, `shot_size` (와이드샷/미디엄샷/클로즈업/익스트림 클로즈업), and
+  `continuity_notes` (explicit cut-to-cut relationship — same background/lighting vs. jump
+  cut). The guardrail now instructs Gemini to analyze cuts as a connected *sequence*, not
+  independent snapshots, using precise Korean cinematography terms, and to fold
+  `continuity_notes` into `fal_reference_prompt`'s English text when continuity is called for.
+  **Deliberately out of scope this round** (documented so it isn't silently expected):
+  actual image-to-image chaining between consecutive generated reference images — the
+  pipeline still independently composites the user's real product photo onto each cut's
+  background, which is the safer way to guarantee the product itself never drifts; continuity
+  is reinforced at the prompt/instruction level only, not pixel-chained.
+- **`BenchmarkVideoAnalyzerView.tsx`**: `onApply` signature changed to
+  `(scenes: SceneItem[], script: ScriptCandidate) => void`. `handleApply` now concatenates all
+  cuts' `narration_text` into a synthesized script (`style: '벤치마킹 재창조형'`,
+  `hook_type: '벤치마킹 기반 역기획'`) and passes it alongside the scenes. Cut cards gained an
+  editable narration textarea plus `shot_size`/`continuity_notes` display.
+- **`StoryboardTimelineView.tsx`**: new optional props `onUpdateScripts`, `onSelectScript`,
+  `onBenchmarkFlowComplete` (all just pass-throughs to handlers `App.tsx` already had). The
+  benchmark `onApply` handler now also calls `onUpdateScripts([script])` +
+  `onSelectScript(script)`, then `onBenchmarkFlowComplete?.()` instead of the generic
+  `onNextStep()`.
+- **`App.tsx`**: new `handleBenchmarkFlowComplete()` — marks both `'script'` and
+  `'storyboard'` steps completed and jumps straight to `'audio'`. **Deliberately does not**
+  reuse `handleNextStepFrom('storyboard')` for this — that function's validation reads
+  `project` from closure, which is still stale at the point of the call (the `setProject`
+  calls from the scripts/scenes updates in the same event handler haven't re-rendered yet),
+  so it would have incorrectly shown a "no script selected" warning immediately after a
+  script was just applied. Caught and fixed during implementation, not by the user.
+
+Verified with `npx tsc --noEmit` (clean), local dev boot, endpoint still 401-gated. Full
+end-to-end (real benchmark video → real narration quality → real script/scene consistency
+after apply) still needs a real user pass — Gemini Files API calls aren't practical to
+exercise from this sandbox.
+
 ## Next session — pick up here
 
-1. **v1.1.5's Typecast fixes need real-account confirmation** — preview
+1. **v1.1.7's benchmark-flow separation needs a real end-to-end run** — upload
+   a real benchmark video, confirm the applied scenes' narration reads well,
+   confirm step 3 shows the synthesized "벤치마킹 재창조형" script selected,
+   and confirm the app actually lands on the audio step automatically after
+   applying (this exercises the new `handleBenchmarkFlowComplete` path,
+   which fixed a stale-closure bug found during implementation, not by the
+   user — worth double-checking it actually works as intended).
+2. **v1.1.5's Typecast fixes need real-account confirmation** — preview
    should now audibly work (verified the mechanism, not the deployed app
    itself), and the user's own cloned voice should now appear in the "🎙️
    내 클론 보이스" group. If the clone still doesn't show, the next thing to

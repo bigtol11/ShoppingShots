@@ -1356,7 +1356,8 @@ async function uploadVideoToGeminiFiles(ai: GoogleGenAI, buffer: Buffer, mimeTyp
 // below for the guardrails that keep this in "unprotectable technique" territory rather than
 // "copied expression."
 const BENCHMARK_ANALYSIS_GUARDRAIL = `
-당신은 숏폼 영상의 "연출 기법"만 분석하는 전문 영상 분석가입니다. 절대 규칙:
+당신은 숏폼 영상의 "연출 기법"을 영화/숏드라마 촬영감독 수준으로 정밀하게 분석하는 전문
+영상 분석가 겸 카피라이터입니다. 절대 규칙:
 
 1. 브랜드 로고, 특정 캐릭터, 원본 영상에만 존재하는 고유한 시각 요소(예: 특정 인물의 얼굴,
 독자적인 캐릭터 디자인, 텍스트 그래픽의 구체적 문구)는 절대 추출하지 마세요. 그런 요소가
@@ -1368,10 +1369,22 @@ const BENCHMARK_ANALYSIS_GUARDRAIL = `
 구도/카메라 움직임만 영어로 구체적으로 묘사하세요.
 4. 원본 영상에 삽입된 자막/텍스트 문구는 그대로 베끼지 말고, "이 위치에 이런 종류의 정보가
 나왔다"는 구조만 참고 정보로 남기세요.
+5. 컷들을 독립된 스냅샷이 아니라 하나로 이어지는 "시퀀스"로 분석하세요. 각 컷을 볼 때 항상
+직전 컷과의 관계(같은 배경/조명을 유지하는지, 점프컷으로 완전히 다른 장소/구도로 전환되는지)를
+함께 판단하고, 정확한 한국어 촬영 용어를 쓰세요 — 샷 크기(와이드샷/미디엄샷/클로즈업/
+익스트림 클로즈업), 카메라 움직임(고정/팬/틸트/트래킹/돌리인·아웃/짐벌·핸드헬드), 조명 톤
+(하이키/로우키/자연광/역광).
+6. 나레이션(narration_text)은 실제 방송 가능한 쇼핑쇼츠 대본입니다 — 상품명/브랜드명을
+절대 직접 언급하지 말고 "이 제품/이거/이게"로만 지칭하세요. 컷의 suggested_duration_sec ×
+5~6자를 넘지 않게 분량을 지키고, 주어진 [참고 상품 정보]에 없는 사실은 절대 지어내지
+마세요. 마지막 컷의 나레이션은 댓글/저장을 유도하는 구체적 문구로 마무리하세요.
 
 fal_video_prompt 작성 시 반드시 지킬 모션 규칙: "The scene is exactly as the reference image
 — do not change any detail."로 시작할 것. slam/plunge/explode/aggressively 같은 과격한
 동사는 절대 쓰지 말고 slowly/gently/naturally/carefully/deliberately만 사용할 것.
+fal_reference_prompt 작성 시 continuity_notes에서 "직전 컷과 배경/조명 유지"라고 판단했다면
+그 사실을 영어 프롬프트 문장에도 명시적으로 포함시키세요(예: "same background and lighting
+as the previous shot, camera angle changed to...").
 `;
 
 app.post('/api/analyze-benchmark-video', async (req, res) => {
@@ -1389,15 +1402,19 @@ app.post('/api/analyze-benchmark-video', async (req, res) => {
     const { fileUri, mimeType: uploadedMimeType } = await uploadVideoToGeminiFiles(ai, buffer, mimeType);
 
     const instructionText = `
-첨부된 영상을 컷 단위로 역기획하세요. ${productContext ? `[참고 - 이 분석을 적용할 실제 상품 정보]: ${productContext}` : ''}
+첨부된 영상을 컷 단위로 역기획하세요. ${productContext ? `[참고 - 이 분석을 적용할 실제 상품 정보]: ${productContext}` : '[참고 상품 정보 없음 — 나레이션은 일반적인 후킹/전개 구조만 작성하고 구체적 스펙은 지어내지 마세요]'}
 
 반드시 JSON 배열로 응답하세요. 각 원소는 다음 필드를 포함합니다:
 - scene_id: "B01", "B02"... 순번
 - start_sec, end_sec, suggested_duration_sec: 숫자
 - purpose: "visual_hook" | "problem_statement" | "product_reveal" | "core_mechanism" | "use_case" | "cta_loop" 중 하나
-- camera_movement: 카메라 움직임 기법 (한국어)
+- shot_size: "와이드샷" | "미디엄샷" | "클로즈업" | "익스트림 클로즈업" 중 실제 관찰된 값
+- camera_movement: 정확한 한국어 촬영 용어로 카메라 움직임 기법
 - composition_notes: 구도/배치 설명 (한국어)
 - pacing_notes: 컷 전환 템포 설명 (한국어)
+- continuity_notes: 직전 컷과의 시각적 연속성 (첫 컷은 "시작 컷")
+- narration_text: 이 컷에서 실제로 말할 나레이션 대본 (한국어, 상품명 직접 언급 금지)
+- subtitle_text: 화면에 표시할 짧은 자막 문구 (한국어, 20자 이내)
 - fal_reference_prompt: 정지 레퍼런스 이미지용 영어 프롬프트 (배경/조명/구도만, 제품 묘사 제외)
 - fal_video_prompt: 그 정지 이미지에 적용할 모션 영어 프롬프트 (위 모션 규칙 준수)
 `;
@@ -1418,13 +1435,17 @@ app.post('/api/analyze-benchmark-video', async (req, res) => {
               end_sec: { type: Type.NUMBER },
               suggested_duration_sec: { type: Type.NUMBER },
               purpose: { type: Type.STRING },
+              shot_size: { type: Type.STRING },
               camera_movement: { type: Type.STRING },
               composition_notes: { type: Type.STRING },
               pacing_notes: { type: Type.STRING },
+              continuity_notes: { type: Type.STRING },
+              narration_text: { type: Type.STRING },
+              subtitle_text: { type: Type.STRING },
               fal_reference_prompt: { type: Type.STRING },
               fal_video_prompt: { type: Type.STRING }
             },
-            required: ['scene_id', 'purpose', 'fal_reference_prompt', 'fal_video_prompt']
+            required: ['scene_id', 'purpose', 'narration_text', 'fal_reference_prompt', 'fal_video_prompt']
           }
         }
       }

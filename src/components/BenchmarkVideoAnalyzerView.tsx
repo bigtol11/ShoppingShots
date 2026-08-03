@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { SceneItem } from '../types';
+import { SceneItem, ScriptCandidate } from '../types';
 import { apiFetch } from '../utils/apiClient';
 import { Video, Image as ImageIcon, Sparkles, RefreshCw, X, Wand2, Film, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
@@ -9,15 +9,23 @@ interface BenchmarkCut {
   end_sec?: number;
   suggested_duration_sec?: number;
   purpose: string;
+  shot_size?: string;
   camera_movement: string;
   composition_notes: string;
   pacing_notes: string;
+  continuity_notes?: string;
+  narration_text: string;
+  subtitle_text?: string;
   fal_reference_prompt: string;
   fal_video_prompt: string;
 }
 
 interface BenchmarkVideoAnalyzerViewProps {
-  onApply: (scenes: SceneItem[]) => void;
+  // Applying now also synthesizes a matching ScriptCandidate from the per-cut narration —
+  // this is what makes the benchmark path an independent, self-consistent track instead of
+  // silently depending on whatever script happened to be selected in step 3 (which had no
+  // relation to the benchmark video's actual length/tone/cut count).
+  onApply: (scenes: SceneItem[], script: ScriptCandidate) => void;
   onClose: () => void;
   productName?: string;
 }
@@ -129,9 +137,9 @@ export const BenchmarkVideoAnalyzerView: React.FC<BenchmarkVideoAnalyzerViewProp
         end_time: end,
         duration,
         purpose: (cut.purpose as SceneItem['purpose']) || 'use_case',
-        narration: '나레이션을 입력하거나 3단계에서 선택한 대본을 참고해 채워주세요.',
-        subtitle: cut.composition_notes?.slice(0, 24) || '자막 문구 입력',
-        required_visual: cut.composition_notes || cut.camera_movement || '',
+        narration: cut.narration_text || '',
+        subtitle: cut.subtitle_text || cut.composition_notes?.slice(0, 24) || '자막 문구 입력',
+        required_visual: [cut.shot_size, cut.composition_notes].filter(Boolean).join(' — ') || cut.camera_movement || '',
         preferred_source_grade: 'A',
         source_type: 'AI',
         transition: 'HARD_CUT',
@@ -143,7 +151,23 @@ export const BenchmarkVideoAnalyzerView: React.FC<BenchmarkVideoAnalyzerViewProp
         // runs on scenes without media_url.
       };
     });
-    onApply(scenes);
+
+    // Synthesize a matching ScriptCandidate from the per-cut narration so 3단계(대본) and
+    // 4단계(스토리보드) are never out of sync — both now come from this one analysis pass.
+    const fullText = cuts.map((c) => c.narration_text).filter(Boolean).join(' ');
+    const totalDuration = scenes.reduce((sum, s) => sum + s.duration, 0);
+    const script: ScriptCandidate = {
+      id: `benchmark_${Date.now()}`,
+      title: '벤치마킹 영상 재창조형',
+      style: '벤치마킹 재창조형',
+      target_duration_sec: Math.round(totalDuration),
+      full_text: fullText,
+      hook_type: '벤치마킹 기반 역기획',
+      risk_notes: ['벤치마킹 영상 구조를 참고해 자동 합성된 대본입니다. 필요시 오디오 단계 진입 전 나레이션을 직접 검토/수정하세요.'],
+      confidence_score: 0.7
+    };
+
+    onApply(scenes, script);
   };
 
   return (
@@ -221,26 +245,52 @@ export const BenchmarkVideoAnalyzerView: React.FC<BenchmarkVideoAnalyzerViewProp
             <>
               <div className="p-2.5 bg-emerald-950/40 border border-emerald-800/50 rounded-xl text-[11px] text-emerald-200 flex items-center space-x-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>{cuts.length}개 컷으로 분석 완료. 필요하면 아래에서 구도/템포 설명을 수정한 뒤 적용하세요.</span>
+                <span>{cuts.length}개 컷으로 분석 완료 (나레이션 포함, 대본 3단계도 자동 합성됩니다). 필요하면 아래에서 수정한 뒤 적용하세요.</span>
               </div>
 
-              <div className="space-y-2.5 max-h-[45vh] overflow-y-auto pr-1">
+              <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
                 {cuts.map((cut, idx) => (
                   <div key={cut.scene_id || idx} className="bg-[#121020] border border-[#272342] rounded-xl p-3 space-y-2">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between flex-wrap gap-1">
                       <span className="text-xs font-bold text-purple-300 font-mono">{cut.scene_id}</span>
-                      <span className="text-[10px] bg-[#28214b] text-indigo-200 px-2 py-0.5 rounded border border-purple-800/40">
-                        {cut.purpose} · {cut.suggested_duration_sec || (cut.end_sec! - cut.start_sec!)}초
-                      </span>
+                      <div className="flex items-center gap-1">
+                        {cut.shot_size && (
+                          <span className="text-[10px] bg-[#1c2238] text-indigo-200 px-2 py-0.5 rounded border border-indigo-800/40">
+                            {cut.shot_size}
+                          </span>
+                        )}
+                        <span className="text-[10px] bg-[#28214b] text-indigo-200 px-2 py-0.5 rounded border border-purple-800/40">
+                          {cut.purpose} · {cut.suggested_duration_sec || (cut.end_sec! - cut.start_sec!)}초
+                        </span>
+                      </div>
                     </div>
-                    <textarea
-                      value={cut.composition_notes}
-                      onChange={(e) => handleUpdateCut(idx, 'composition_notes', e.target.value)}
-                      rows={2}
-                      className="w-full bg-[#0f0d1c] border border-[#272147] rounded-lg p-2 text-[11px] text-slate-200 focus:outline-none focus:border-purple-500 resize-none"
-                      placeholder="구도 설명"
-                    />
-                    <div className="text-[10px] text-slate-500">카메라: {cut.camera_movement} · 템포: {cut.pacing_notes}</div>
+
+                    <div>
+                      <label className="text-[10px] text-slate-500 block mb-0.5">나레이션</label>
+                      <textarea
+                        value={cut.narration_text}
+                        onChange={(e) => handleUpdateCut(idx, 'narration_text', e.target.value)}
+                        rows={2}
+                        className="w-full bg-[#0f0d1c] border border-emerald-900/40 rounded-lg p-2 text-[11px] text-emerald-100 focus:outline-none focus:border-emerald-500 resize-none"
+                        placeholder="나레이션"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] text-slate-500 block mb-0.5">구도 / 카메라</label>
+                      <textarea
+                        value={cut.composition_notes}
+                        onChange={(e) => handleUpdateCut(idx, 'composition_notes', e.target.value)}
+                        rows={2}
+                        className="w-full bg-[#0f0d1c] border border-[#272147] rounded-lg p-2 text-[11px] text-slate-200 focus:outline-none focus:border-purple-500 resize-none"
+                        placeholder="구도 설명"
+                      />
+                    </div>
+
+                    <div className="text-[10px] text-slate-500 space-y-0.5">
+                      <div>카메라: {cut.camera_movement} · 템포: {cut.pacing_notes}</div>
+                      {cut.continuity_notes && <div>연속성: {cut.continuity_notes}</div>}
+                    </div>
                   </div>
                 ))}
               </div>
