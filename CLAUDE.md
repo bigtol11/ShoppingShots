@@ -684,9 +684,50 @@ confirming both touched endpoints are still 401-gated. **Not yet tested with
 real API keys** — the shopping-ranking-scoped Gemini prompt and the velocity
 sort math are both unverified against real data.
 
+### v1.1.2 — Left sidebar replaced with a single horizontal top step bar; shortened/de-branded step names
+
+User asked to remove the vertical left sidebar entirely and replace it with
+one horizontal menu-bar row for all 6 steps, and to shorten/rename the step
+labels — specifically calling out "쿠팡" branding on step 2 as wrong (it's
+the first real step of *making* the video, not something Coupang-specific)
+and asking the rest to read as a coherent video-production pipeline.
+
+- **New `src/components/StepNav.tsx`** replaces `src/components/Sidebar.tsx`
+  (deleted — fully replaced, no longer imported anywhere). Single
+  horizontally-scrollable row (`overflow-x-auto`) with all 6 steps as
+  compact pill buttons: numbered by position instead of verbose text
+  (`1 트렌드`, `2 상품등록`, `3 대본`, `4 스토리보드`, `5 오디오`, `6 렌더링`) —
+  down from the old `"2. 🔗 쿠팡 파트너스/팩트"` style labels. Completed steps
+  show a checkmark instead of the icon; no separate progress-bar footer
+  (the old Sidebar's `파이프라인 진행률` bar) since the row itself now
+  visually shows progress via per-tab checkmarks.
+- **`App.tsx`**: dropped `isSidebarOpen` state and the `<Sidebar>` render,
+  added `<StepNav>` as its own full-width row directly under `<Header>`.
+- **`Header.tsx`**: removed the hamburger menu button (nothing left for it
+  to open) and the now-redundant "🏠 첫 화면" nav item (StepNav's first tab
+  + the logo click already cover this). "📁 내 프로젝트" moved out of the
+  `hidden md:flex` nav and into an always-visible icon button in the header's
+  right controls, since mobile users no longer have the sidebar drawer as a
+  fallback way to reach it.
+- **Consistency cleanup** (same session, same "코드를 대폭 수정" request):
+  `TrendBenchmarkingView`'s banner text shortened from "탭 1: 🔥 트렌드 주제 &
+  벤치마킹 분석 엔진" to "1. 트렌드". `VideoPreviewPlayer.tsx` had stale
+  "워크플로우 6/7/8단계" labels left over from the original 9-step scaffold
+  (thumbnail/render/metadata are all sub-sections of the *same* step 6 in
+  the current 6-step pipeline, not separate steps 6/7/8) — relabeled to
+  "6단계 · 썸네일" / "6단계 · 렌더링" / "6단계 · 배포 준비", plus fixed three
+  "다음 단계: 7./8./9." button labels referencing the same stale numbering.
+
+Verified with `npx tsc --noEmit` (clean), local dev boot, confirmed no
+remaining `Sidebar` references anywhere in `src/`.
+
 ## Next session — pick up here
 
-1. **v1.1.1's shopping-ranking search scoping and velocity sort are
+1. **v1.1.2's new layout has not been visually checked in a real browser**
+   — only type-checked and boot-tested. Confirm the horizontal step bar
+   actually scrolls cleanly on a real narrow phone width and that nothing
+   overlaps with the sticky header.
+2. **v1.1.1's shopping-ranking search scoping and velocity sort are
    untested with real data** — verify the auto-recommend results actually
    come from shopping rankings (not news) and that 화력순 surfaces genuinely
    fast-growing videos, not just recent ones.

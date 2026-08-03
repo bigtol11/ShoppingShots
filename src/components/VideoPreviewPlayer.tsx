@@ -351,11 +351,11 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
             <div className="flex items-center justify-between border-b border-[#2d2948] pb-3">
               <div>
                 <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
-                  워크플로우 6단계
+                  6단계 · 썸네일
                 </span>
                 <h2 className="text-base font-bold text-white flex items-center space-x-2">
                   <Sparkles className="w-4 h-4 text-amber-400" />
-                  <span>6. 🖼️ 썸네일/CTR 카피 세팅</span>
+                  <span>🖼️ 썸네일/CTR 카피 세팅</span>
                 </h2>
               </div>
               <span className="text-xs bg-amber-950 text-amber-300 border border-amber-800/40 px-2.5 py-1 rounded font-bold">
@@ -447,7 +447,7 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
                   onClick={onNextStep}
                   className="w-full bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2.5 rounded-xl transition flex items-center justify-center space-x-1 mt-2"
                 >
-                  <span>다음 단계: 7. 🚀 렌더링/출고 진행</span>
+                  <span>다음: 🚀 렌더링/출고 진행</span>
                   <ExternalLink className="w-3.5 h-3.5 ml-1" />
                 </button>
               )}
@@ -463,11 +463,11 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
             <div className="flex items-center justify-between border-b border-[#2d2948] pb-3">
               <div>
                 <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
-                  워크플로우 7단계
+                  6단계 · 렌더링
                 </span>
                 <h2 className="text-base font-bold text-white flex items-center space-x-2">
                   <Film className="w-4 h-4 text-emerald-400" />
-                  <span>7. 🚀 비디오 렌더링 & 파일 출고</span>
+                  <span>🚀 비디오 렌더링 & 파일 출고</span>
                 </h2>
               </div>
               <span className="text-xs bg-emerald-950 text-emerald-300 border border-emerald-800/40 px-2.5 py-1 rounded font-bold">
@@ -599,7 +599,7 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
                 onClick={onNextStep}
                 className="w-full bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2.5 rounded-xl transition flex items-center justify-center space-x-1 mt-2"
               >
-                <span>다음 단계: 8. 📲 플랫폼 메타데이터 카피</span>
+                <span>다음: 📲 플랫폼 메타데이터 카피</span>
                 <ExternalLink className="w-3.5 h-3.5 ml-1" />
               </button>
             )}
@@ -614,11 +614,11 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
             <div className="flex items-center justify-between border-b border-[#2d2948] pb-3">
               <div>
                 <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider block">
-                  워크플로우 8단계
+                  6단계 · 배포 준비
                 </span>
                 <h2 className="text-base font-bold text-white flex items-center space-x-2">
                   <Share2 className="w-4 h-4 text-purple-400" />
-                  <span>8. 📲 플랫폼별 메타데이터 원클릭 카피</span>
+                  <span>📲 플랫폼별 메타데이터 원클릭 카피</span>
                 </h2>
               </div>
               <span className="text-xs bg-purple-950 text-purple-300 border border-purple-800/40 px-2.5 py-1 rounded font-bold">
@@ -752,7 +752,7 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
                   onClick={onNextStep}
                   className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2.5 rounded-xl transition flex items-center justify-center space-x-1 mt-2"
                 >
-                  <span>9. ⚙️ API 설정/요금제 이동</span>
+                  <span>⚙️ API 설정/요금제 이동</span>
                   <ExternalLink className="w-3.5 h-3.5 ml-1" />
                 </button>
               )}

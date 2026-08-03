@@ -1,5 +1,5 @@
 import React from 'react';
-import { Star, Moon, FolderKanban, Settings, Sparkles, LogOut, LogIn, RefreshCw, Menu, Home, Plus } from 'lucide-react';
+import { Star, Moon, FolderKanban, Settings, Sparkles, LogOut, LogIn, RefreshCw, Plus } from 'lucide-react';
 
 interface HeaderProps {
   activeTab: string;
@@ -9,25 +9,13 @@ interface HeaderProps {
   onLogout?: () => void;
   onLogin?: () => void;
   isLoggingIn?: boolean;
-  onMenuClick?: () => void;
   onNewProject?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, projectName, userEmail, onLogout, onLogin, isLoggingIn, onMenuClick, onNewProject }) => {
+export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, projectName, userEmail, onLogout, onLogin, isLoggingIn, onNewProject }) => {
   return (
     <header className="bg-[#12111d] border-b border-[#2d2948] px-2.5 sm:px-4 py-2.5 flex items-center justify-between text-slate-200 select-none sticky top-0 z-50">
       <div className="flex items-center space-x-2 sm:space-x-6 min-w-0">
-        {/* Hamburger menu — mobile/tablet only, opens the Sidebar drawer */}
-        {onMenuClick && (
-          <button
-            onClick={onMenuClick}
-            className="lg:hidden p-2 -ml-1 text-slate-300 hover:text-white hover:bg-[#201c3b] rounded-lg transition-colors shrink-0"
-            aria-label="메뉴 열기"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-        )}
-
         {/* Brand Logo — also doubles as a home button */}
         <button
           onClick={() => setActiveTab('trend')}
@@ -48,32 +36,21 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, project
           </div>
         </button>
 
-        {/* Navigation Bar */}
-        <nav className="hidden md:flex items-center space-x-2 text-xs font-medium text-slate-300">
-          <button
-            onClick={() => setActiveTab('trend')}
-            title="첫 화면(트렌드 탐색)으로 돌아가기"
-            className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition-colors ${
-              activeTab === 'trend'
-                ? 'bg-purple-600/30 text-purple-200 border border-purple-500/40 font-semibold shadow-sm'
-                : 'hover:bg-[#1d1a33] hover:text-white'
-            }`}
-          >
-            <Home className="w-3.5 h-3.5 text-purple-400" />
-            <span>🏠 첫 화면</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('projects')}
-            className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition-colors ${
-              activeTab === 'projects'
-                ? 'bg-purple-600/30 text-purple-200 border border-purple-500/40 font-semibold shadow-sm'
-                : 'hover:bg-[#1d1a33] hover:text-white'
-            }`}
-          >
-            <FolderKanban className="w-3.5 h-3.5 text-purple-400" />
-            <span>📁 내 프로젝트</span>
-          </button>
-        </nav>
+        {/* Project gallery — separate from the pipeline steps in StepNav below, so it
+            stays here rather than in the horizontal step bar. Icon-only on narrow
+            screens now that there's no sidebar drawer to fall back on for mobile. */}
+        <button
+          onClick={() => setActiveTab('projects')}
+          title="내 프로젝트"
+          className={`px-2.5 sm:px-3 py-1.5 rounded-lg flex items-center space-x-1.5 text-xs font-medium transition-colors shrink-0 ${
+            activeTab === 'projects'
+              ? 'bg-purple-600/30 text-purple-200 border border-purple-500/40 font-semibold shadow-sm'
+              : 'text-slate-300 hover:bg-[#1d1a33] hover:text-white'
+          }`}
+        >
+          <FolderKanban className="w-3.5 h-3.5 text-purple-400" />
+          <span className="hidden sm:inline">📁 내 프로젝트</span>
+        </button>
       </div>
 
       {/* Right Controls */}

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProjectData, ProductFacts, ScriptCandidate, SceneItem, AudioConfig, CompletedProject } from './types';
 import { Header } from './components/Header';
-import { Sidebar } from './components/Sidebar';
+import { StepNav } from './components/StepNav';
 import { TrendBenchmarkingView } from './components/TrendBenchmarkingView';
 import { ProductImportView } from './components/ProductImportView';
 import { ScriptGeneratorView } from './components/ScriptGeneratorView';
@@ -109,7 +109,6 @@ export default function App() {
   const [activeStep, setActiveStep] = useState<string>('trend');
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
   const [project, setProject] = useState<ProjectData>(makeEmptyProject);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
 
   // Discards all in-progress work (product/script/storyboard/audio/render state)
@@ -122,7 +121,6 @@ export default function App() {
     setValidationWarning(null);
     setActiveStep('trend');
     setIsResetConfirmOpen(false);
-    setIsSidebarOpen(false);
   };
 
   const markStepCompleted = (stepId: string) => {
@@ -268,9 +266,10 @@ export default function App() {
         onLogout={handleLogout}
         onLogin={handleGoogleLogin}
         isLoggingIn={isLoggingIn}
-        onMenuClick={() => setIsSidebarOpen(true)}
         onNewProject={() => setIsResetConfirmOpen(true)}
       />
+
+      <StepNav activeStep={activeStep} setActiveStep={setActiveStep} completedSteps={completedSteps} />
 
       {authError && (
         <div className="bg-rose-950/80 border-b border-rose-800 text-rose-200 text-xs px-4 py-2 flex items-center justify-between">
@@ -280,15 +279,6 @@ export default function App() {
       )}
 
       <div className="flex flex-1 overflow-hidden relative">
-        <Sidebar
-          activeStep={activeStep}
-          setActiveStep={setActiveStep}
-          completedSteps={completedSteps}
-          sceneCount={project.scenes?.length || 0}
-          isMobileOpen={isSidebarOpen}
-          onMobileClose={() => setIsSidebarOpen(false)}
-        />
-
         <main className="flex-1 overflow-y-auto bg-[#0b0a12] relative min-w-0 w-full overflow-x-hidden p-3 sm:p-4 lg:p-6">
           <AnimatePresence mode="wait">
             <motion.div

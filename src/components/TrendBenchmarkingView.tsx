@@ -213,7 +213,7 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
         <div className="relative z-10 max-w-3xl space-y-2">
           <div className="inline-flex items-center space-x-2 bg-purple-950/80 border border-purple-500/40 px-3 py-1 rounded-full text-xs text-purple-300 font-semibold">
             <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-            <span>탭 1: 🔥 트렌드 주제 & 벤치마킹 분석 엔진</span>
+            <span>1. 트렌드</span>
           </div>
           <h2 className="text-2xl font-black text-white tracking-tight">
             바이럴 쇼핑 트렌드 실시간 탐색
