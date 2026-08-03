@@ -1663,27 +1663,38 @@ app.get('/api/tts/typecast/actors', async (req, res) => {
   }
 
   try {
-    const fetchRes = await fetch('https://api.typecast.ai/v2/voices', {
-      headers: { 'X-API-KEY': typecastKey }
-    });
+    // Confirmed by live testing against the real API: the default (unfiltered) /v2/voices
+    // call only returns voice_type:"original" (the public library) — a user's own cloned
+    // voices only appear when explicitly requesting ?voice_type=custom. The valid enum
+    // values (confirmed via the API's own validation error) are exactly 'original'/'custom'.
+    // Fetch both and merge so cloned voices actually show up.
+    const [originalRes, customRes] = await Promise.all([
+      fetch('https://api.typecast.ai/v2/voices?voice_type=original', { headers: { 'X-API-KEY': typecastKey } }),
+      fetch('https://api.typecast.ai/v2/voices?voice_type=custom', { headers: { 'X-API-KEY': typecastKey } })
+    ]);
 
-    if (!fetchRes.ok) {
+    if (!originalRes.ok) {
       return res.json({
         status: 'error',
-        message: `Typecast 성우 목록 조회 실패 (HTTP ${fetchRes.status})`,
+        message: `Typecast 성우 목록 조회 실패 (HTTP ${originalRes.status})`,
         actors: []
       });
     }
 
-    const rawList = await fetchRes.json();
-    const actors = (Array.isArray(rawList) ? rawList : []).map((v: any) => ({
+    const originalList = await originalRes.json();
+    const customList = customRes.ok ? await customRes.json() : [];
+    const rawList = [...(Array.isArray(customList) ? customList : []), ...(Array.isArray(originalList) ? originalList : [])];
+
+    const actors = rawList.map((v: any) => ({
       id: v.voice_id,
       name: v.voice_name,
       provider: 'typecast',
       gender: v.gender === 'female' ? '여성' : v.gender === 'male' ? '남성' : '혼성',
       style: [v.age, ...(Array.isArray(v.use_cases) ? v.use_cases : [])].filter(Boolean).join(' · ') || 'Typecast AI Voice',
-      sample: '',
-      isCustomClone: v.voice_type === 'cloned' || v.voice_type === 'custom',
+      // Real, non-empty Korean sample text — the previous empty string meant every preview
+      // request synthesized zero characters and silently failed for every real voice.
+      sample: '안녕하세요! 이 목소리로 쇼핑쇼츠 나레이션을 제작해 보세요.',
+      isCustomClone: v.voice_type === 'custom',
       isUnlocked: true,
       model: v.models?.[0]?.version || 'ssfm-v30'
     }));

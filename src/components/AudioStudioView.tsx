@@ -51,6 +51,7 @@ export const AudioStudioView: React.FC<AudioStudioViewProps> = ({
 
   const [typecastActors, setTypecastActors] = useState<any[]>([]);
   const [elevenlabsVoices, setElevenlabsVoices] = useState<any[]>([]);
+  const [typecastSearchQuery, setTypecastSearchQuery] = useState('');
 
   const fetchVoices = async () => {
     const tcKey = localStorage.getItem('lucy_api_typecast_key');
@@ -460,73 +461,83 @@ export const AudioStudioView: React.FC<AudioStudioViewProps> = ({
 
                 {hasTypecastKey && typecastActors.length > 0 ? (
                   <div className="space-y-2 pt-1">
-                    {typecastActors.map((actor) => {
-                      const isSelected = audioConfig.voice_id === actor.id;
-                      const isPreviewing = previewingVoiceId === actor.id;
-                      const isLoadingThisPreview = isPreviewLoading === actor.id;
+                    <input
+                      type="text"
+                      value={typecastSearchQuery}
+                      onChange={(e) => setTypecastSearchQuery(e.target.value)}
+                      placeholder={`성우 이름으로 검색 (전체 ${typecastActors.length}명)`}
+                      className="w-full bg-[#0e0c18] border border-[#2e2850] rounded-lg px-2.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
+                    />
 
+                    <select
+                      value={audioConfig.voice_provider === 'typecast' ? audioConfig.voice_id : ''}
+                      onChange={(e) => {
+                        const actor = typecastActors.find((a) => a.id === e.target.value);
+                        if (!actor) return;
+                        onUpdateAudioConfig({
+                          ...audioConfig,
+                          voice_id: actor.id,
+                          voice_name: actor.name,
+                          voice_provider: 'typecast',
+                          emotion_style: actor.style
+                        });
+                      }}
+                      className="w-full bg-[#18152b] border border-[#2e2850] rounded-lg px-2.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                    >
+                      <option value="" disabled>성우를 선택하세요</option>
+                      {typecastActors.filter((a) => a.isCustomClone).length > 0 && (
+                        <optgroup label="🎙️ 내 클론 보이스">
+                          {typecastActors
+                            .filter((a) => a.isCustomClone && a.name.toLowerCase().includes(typecastSearchQuery.toLowerCase()))
+                            .map((a) => (
+                              <option key={a.id} value={a.id}>{a.name} ({a.gender})</option>
+                            ))}
+                        </optgroup>
+                      )}
+                      <optgroup label={`타입캐스트 성우 라이브러리 (${typecastActors.filter((a) => !a.isCustomClone).length}명)`}>
+                        {typecastActors
+                          .filter((a) => !a.isCustomClone && a.name.toLowerCase().includes(typecastSearchQuery.toLowerCase()))
+                          .map((a) => (
+                            <option key={a.id} value={a.id}>{a.name} ({a.gender}, {a.style})</option>
+                          ))}
+                      </optgroup>
+                    </select>
+
+                    {audioConfig.voice_provider === 'typecast' && (() => {
+                      const selectedActor = typecastActors.find((a) => a.id === audioConfig.voice_id);
+                      if (!selectedActor) return null;
+                      const isPreviewing = previewingVoiceId === selectedActor.id;
+                      const isLoadingThisPreview = isPreviewLoading === selectedActor.id;
                       return (
-                        <div
-                          key={actor.id}
-                          onClick={() =>
-                            onUpdateAudioConfig({
-                              ...audioConfig,
-                              voice_id: actor.id,
-                              voice_name: `${actor.name}`,
-                              voice_provider: 'typecast',
-                              emotion_style: actor.style
-                            })
+                        <button
+                          onClick={(e) =>
+                            handlePreviewVoice(
+                              { id: selectedActor.id, provider: 'typecast', name: selectedActor.name, sample: selectedActor.sample },
+                              e
+                            )
                           }
-                          className={`p-2.5 rounded-xl border cursor-pointer transition flex items-center justify-between ${
-                            isSelected
-                              ? 'bg-[#28214c] border-purple-500 text-white shadow-md shadow-purple-950/50 ring-1 ring-purple-500'
-                              : 'bg-[#18152b] border-[#2e2850] hover:border-purple-800 text-slate-300'
+                          className={`w-full px-3 py-2 rounded-lg text-xs font-bold flex items-center justify-center space-x-1.5 border transition min-h-[38px] ${
+                            isPreviewing
+                              ? 'bg-purple-600 text-white border-purple-400 animate-pulse'
+                              : 'bg-[#221c3d] text-purple-300 border-[#3d336b] hover:bg-purple-900/60'
                           }`}
                         >
-                          <div className="space-y-0.5 max-w-[68%]">
-                            <div className="flex items-center space-x-1.5 flex-wrap gap-1">
-                              <span className="text-xs font-bold text-white">{actor.name}</span>
-                              {actor.isCustomClone && (
-                                <span className="text-[9px] bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-1.5 py-0.2 rounded font-bold shadow-sm">
-                                  내 클론 보이스
-                                </span>
-                              )}
-                              <span className="text-[10px] bg-purple-950 text-purple-300 px-1.5 py-0.2 rounded border border-purple-800/40">
-                                {actor.gender || '혼성'}
-                              </span>
-                            </div>
-                            <p className="text-[10px] text-slate-400 truncate">{actor.style}</p>
-                          </div>
-
-                          <div className="flex items-center space-x-1.5">
-                            <button
-                              onClick={(e) =>
-                                handlePreviewVoice(
-                                  { id: actor.id, provider: 'typecast', name: actor.name, sample: actor.sample },
-                                  e
-                                )
-                              }
-                              className={`px-2 py-1 rounded-lg text-xs font-bold flex items-center space-x-1 border transition min-h-[30px] ${
-                                isPreviewing
-                                  ? 'bg-purple-600 text-white border-purple-400 animate-pulse'
-                                  : 'bg-[#221c3d] text-purple-300 border-[#3d336b] hover:bg-purple-900/60'
-                              }`}
-                            >
-                              {isLoadingThisPreview ? (
-                                <RefreshCw className="w-3 h-3 animate-spin text-purple-300" />
-                              ) : isPreviewing ? (
-                                <Pause className="w-3 h-3 text-white" />
-                              ) : (
-                                <Volume2 className="w-3 h-3 text-purple-400" />
-                              )}
-                              <span>{isPreviewing ? '정지' : '미리듣기'}</span>
-                            </button>
-
-                            {isSelected && <CheckCircle2 className="w-4 h-4 text-purple-400 shrink-0" />}
-                          </div>
-                        </div>
+                          {isLoadingThisPreview ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : isPreviewing ? (
+                            <Pause className="w-3.5 h-3.5" />
+                          ) : (
+                            <Volume2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>{isPreviewing ? '정지' : `"${selectedActor.name}" 미리듣기`}</span>
+                          {selectedActor.isCustomClone && (
+                            <span className="text-[9px] bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-1.5 py-0.2 rounded font-bold">
+                              내 클론
+                            </span>
+                          )}
+                        </button>
                       );
-                    })}
+                    })()}
                   </div>
                 ) : (
                   <div className="p-3 bg-[#171428] border border-[#2e274c] rounded-xl space-y-2 text-center my-1">

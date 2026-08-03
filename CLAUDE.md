@@ -803,9 +803,71 @@ endpoints still 401-gated without auth. The Akamai-block finding above was
 verified with a real `curl` test against the user's actual URL (see this
 session's transcript) — not simulated.
 
+### v1.1.5 — Typecast voice picker: dropdown UI, cloned voices, and a real preview bug fixed with 100% certainty
+
+User asked four things about the Typecast section of the Audio step: (1)
+the voice list was too long, wanted a dropdown; (2) whether all real
+Typecast voices are usable via the API; (3) their own cloned voice wasn't
+appearing; (4) preview didn't work at all. Investigated all four with an
+old Typecast key found earlier in this session's history (real, live API
+calls — not guesses):
+
+- **Confirmed via live `curl`**: unfiltered `GET /v2/voices` returns 596
+  voices, **100% `voice_type:"original"`, zero `"custom"`**. Probed
+  candidate endpoints; `?voice_type=cloned` returned a validation error
+  that revealed the real enum: `"Input should be 'original' or 'custom'"`.
+  `?voice_type=custom` is a **separate, explicit filter** — the default/
+  unfiltered call does not include the user's own cloned voices at all.
+  This is the real reason the clone never appeared: the code only ever
+  called the endpoint without this filter. Fixed by fetching both
+  `voice_type=original` and `voice_type=custom` in parallel and merging.
+  (This specific old test key had zero custom voices registered, so the fix
+  is verified mechanically but not against the user's actual clone — ask
+  them to confirm after deploy.)
+- **Answered "special API-only voice limit?"**: no — all 596 public-library
+  voices are fully usable via the API, nothing is held back. The only real
+  gap was the cloned-voice filter above.
+- **Preview bug root-caused with certainty, not guesswork**: `/api/tts/
+  typecast/actors` mapped every real voice with `sample: ''` (empty
+  string). Live-tested the actual synthesis call: `POST /v1/text-to-speech`
+  with empty `text` returns `422 "String should have at least 1 character"`
+  — confirmed exact mechanism. Fixed by giving every actor a real Korean
+  sample sentence. Also worth recording: an early test of the *Korean-text*
+  synthesis call through this sandbox's `curl`/bash got a `400 "error
+  parsing the body"` — but this was a **shell UTF-8 encoding artifact of
+  the test command itself**, not a real API or app bug; writing the same
+  JSON to a file first (`--data-binary @file`) and resending succeeded
+  (`200`, real WAV). `server.ts`'s actual code path (`JSON.stringify` +
+  `fetch`) was never affected by this — Node encodes UTF-8 correctly by
+  default. Documented here so this false lead isn't rediscovered.
+- **"모두 영어 이름인가요?"**: confirmed from the real data — yes, all 596
+  voices have English/romanized display names (Sanghyun, Seohyeon, Juwan,
+  Woony...) regardless of spoken language; this is Typecast's own branding
+  convention across their whole catalog, not something this app controls.
+  Their `use_cases` tags (`TikTok/Reels/Shorts`, `Conversational`) strongly
+  indicate these are genuinely Korean-capable voices despite the naming.
+- **`AudioStudioView.tsx`**: replaced the long per-voice card list with a
+  search box + `<select>` (optgroup-separated: "내 클론 보이스" first, then
+  the full library) + a single preview button for whichever voice is
+  currently selected. ElevenLabs' voice list still uses the old card-list
+  UI — not touched this round since the user only flagged Typecast, but
+  the same dropdown treatment would apply if asked.
+
+Verified with `npx tsc --noEmit` (clean), local dev boot. The `voice_type=
+custom` fetch and the non-empty sample fix are both mechanically verified
+against the real Typecast API; only the specific "does MY clone show up"
+question needs the user's own key to fully confirm end-to-end.
+
 ## Next session — pick up here
 
-1. **v1.1.4's product-analysis grounding fix needs real user confirmation**:
+1. **v1.1.5's Typecast fixes need real-account confirmation** — preview
+   should now audibly work (verified the mechanism, not the deployed app
+   itself), and the user's own cloned voice should now appear in the "🎙️
+   내 클론 보이스" group. If the clone still doesn't show, the next thing to
+   check is whether their Typecast account's clone is actually tagged
+   `voice_type: "custom"` server-side (ask Typecast support) rather than
+   assuming the app's fetch logic is still wrong.
+2. **v1.1.4's product-analysis grounding fix needs real user confirmation**:
    (a) a Coupang URL should now show the specific "쿠팡은 차단..." error
    instead of hallucinating — confirm the user actually sees this and
    understands to switch to the screenshot tab; (b) try a non-Coupang
