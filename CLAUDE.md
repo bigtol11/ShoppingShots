@@ -936,7 +936,11 @@ from the same source and can never drift out of sync again.
 Verified with `npx tsc --noEmit` (clean), local dev boot, endpoint still 401-gated. Full
 end-to-end (real benchmark video → real narration quality → real script/scene consistency
 after apply) still needs a real user pass — Gemini Files API calls aren't practical to
-exercise from this sandbox.
+exercise from this sandbox. **Deployed** at end of session (user: "커밋/푸쉬 할꺼 있으면
+해주시고, 배포 안한거 있으면 배포 까지 마쳐 주세요") — revision `shoppingshots-00016-cdw`,
+live bundle verified to report v1.1.7. This deploy also carries v1.1.5/v1.1.6 (Typecast
+dropdown, cloned-voice fix, real preview fix, gender/age/use-case filter chips) live for the
+first time.
 
 ## Next session — pick up here
 
