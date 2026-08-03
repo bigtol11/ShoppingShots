@@ -373,6 +373,14 @@ function getUserYoutubeKey(req: express.Request): string | undefined {
   return resolved && resolved.trim().length > 0 ? resolved.trim() : undefined;
 }
 
+// BYOK for fal.ai, same priority order as Gemini: user's own key first, then the
+// admin/env-configured shared key. Keeps the admin panel working as a fallback for
+// users who haven't set their own, while no longer requiring it.
+function getUserFalKey(req: express.Request): string | undefined {
+  const key = (req.headers['x-fal-key'] as string) || req.body?.falApiKey;
+  return key && typeof key === 'string' && key.trim().length > 0 ? key.trim() : undefined;
+}
+
 // Parses ISO 8601 durations (e.g. "PT1M30S", "PT45S") into whole seconds — YouTube's
 // videos.list contentDetails.duration format.
 function parseIso8601DurationToSeconds(iso: string): number {
@@ -1008,7 +1016,7 @@ async function processFalFluxCompositing(bgRemovedUrl: string, prompt: string, a
 
 app.post(['/api/generate/video', '/api/fal/generate-video', '/api/generate-ai-video'], async (req, res) => {
   try {
-    const activeKey = process.env.FAL_KEY || serverFalKey;
+    const activeKey = getUserFalKey(req) || process.env.FAL_KEY || serverFalKey;
 
     const { prompt, model: reqModel, image_url, imageUrl, init_image, duration = 5 } = req.body;
     const referenceImage = image_url || imageUrl || init_image || undefined;
@@ -1282,7 +1290,7 @@ app.post('/api/analyze-benchmark-video', async (req, res) => {
 app.post('/api/generate-benchmark-reference-image', async (req, res) => {
   try {
     const { productImageUrl, referencePrompt } = req.body as { productImageUrl?: string; referencePrompt?: string };
-    const activeKey = process.env.FAL_KEY || serverFalKey;
+    const activeKey = getUserFalKey(req) || process.env.FAL_KEY || serverFalKey;
 
     if (!productImageUrl || !referencePrompt) {
       return res.status(400).json({ status: 'error', message: '제품 이미지와 레퍼런스 프롬프트가 모두 필요합니다.' });
@@ -1514,6 +1522,31 @@ async function synthesizeTypecastAudio(text: string, voiceId: string, apiKey: st
   }
 }
 
+// Real ElevenLabs TTS synthesis — returns audio as base64-encoded MP3.
+// eleven_multilingual_v2 is required for non-English languages including Korean.
+async function synthesizeElevenLabsAudio(text: string, voiceId: string, apiKey: string): Promise<string | null> {
+  try {
+    const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: 'POST',
+      headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 }
+      })
+    });
+    if (!r.ok) {
+      console.warn('[ElevenLabs TTS Error]', r.status, await r.text().catch(() => ''));
+      return null;
+    }
+    const buffer = Buffer.from(await r.arrayBuffer());
+    return buffer.toString('base64');
+  } catch (err: any) {
+    console.warn('[ElevenLabs TTS Network Error]', err.message);
+    return null;
+  }
+}
+
 // Dynamic ElevenLabs Voices Endpoint
 app.get('/api/tts/elevenlabs/voices', async (req, res) => {
   const elevenlabsKey = (req.headers['x-elevenlabs-key'] as string) || (req.query.apiKey as string) || '';
@@ -1707,9 +1740,21 @@ app.post('/api/tts/preview', async (req, res) => {
     }
 
     if (voiceProvider === 'elevenlabs') {
-      // NOTE: not yet wired to a real ElevenLabs synthesis call — falls through to the
-      // Gemini path below so the preview at least produces *some* real audio rather than
-      // silently mislabeling Gemini output as ElevenLabs.
+      const userKey = req.body.apiKey || (req.headers['x-elevenlabs-key'] as string) || '';
+      if (!userKey) {
+        return res.json({ status: 'success', voiceId, voiceProvider, audioBase64: null, fromCache: false, message: 'ElevenLabs API 키가 없어 폴백 음성을 사용합니다.' });
+      }
+      const base64Audio = await synthesizeElevenLabsAudio(sampleText, voiceId, userKey);
+      if (base64Audio) ttsPreviewCache.set(cacheKey, base64Audio);
+      return res.json({
+        status: 'success',
+        voiceId,
+        voiceProvider,
+        audioBase64: base64Audio,
+        audioFormat: base64Audio ? 'mp3' : null,
+        fromCache: false,
+        message: base64Audio ? 'ElevenLabs API 실시간 미리듣기 생성 완료' : 'ElevenLabs 음성 생성에 실패했습니다.'
+      });
     }
 
     // Default Gemini TTS
@@ -1756,7 +1801,7 @@ app.post('/api/tts/preview', async (req, res) => {
 
 app.post('/api/generate-tts', async (req, res) => {
   try {
-    const { text, voiceName = 'Kore', voiceProvider = 'gemini', typecastKey } = req.body;
+    const { text, voiceName = 'Kore', voiceProvider = 'gemini', typecastKey, elevenlabsKey } = req.body;
 
     if (voiceProvider === 'typecast') {
       const userKey = typecastKey || (req.headers['x-typecast-key'] as string) || '';
@@ -1770,6 +1815,21 @@ app.post('/api/generate-tts', async (req, res) => {
         audioBase64: base64Audio,
         audioFormat: base64Audio ? 'wav' : null,
         message: base64Audio ? 'Typecast TTS 음성 생성 성공' : 'Typecast TTS 생성 실패'
+      });
+    }
+
+    if (voiceProvider === 'elevenlabs') {
+      const userKey = elevenlabsKey || (req.headers['x-elevenlabs-key'] as string) || '';
+      if (!userKey) {
+        return res.json({ status: 'success', voiceName, audioBase64: null, message: 'ElevenLabs API 키가 없어 생성할 수 없습니다.' });
+      }
+      const base64Audio = await synthesizeElevenLabsAudio(text, voiceName, userKey);
+      return res.json({
+        status: 'success',
+        voiceName,
+        audioBase64: base64Audio,
+        audioFormat: base64Audio ? 'mp3' : null,
+        message: base64Audio ? 'ElevenLabs TTS 음성 생성 성공' : 'ElevenLabs TTS 생성 실패'
       });
     }
 
@@ -2461,16 +2521,19 @@ app.post('/api/render-video', (req, res) => {
 
       // Narration: prefer the combined TTS track generated client-side during the Audio step.
       // Format depends on which TTS provider generated it — Gemini returns raw 16-bit PCM
-      // @24kHz mono with no container (needs an explicit ffmpeg -f s16le), while Typecast
-      // returns a real WAV file ffmpeg can read directly. audioConfig.narrationAudioFormat
+      // @24kHz mono with no container (needs an explicit ffmpeg -f s16le); Typecast returns
+      // a real WAV file and ElevenLabs returns a real MP3 file, both of which ffmpeg can
+      // read directly since they're self-describing containers. audioConfig.narrationAudioFormat
       // (set by AudioStudioView from /api/generate-tts's response) tells us which.
       let narrationLocalPath = '';
       let narrationIsRawPcm = false;
       if (audioConfig?.narrationAudioBase64) {
         try {
-          const isRawPcm = audioConfig.narrationAudioFormat !== 'wav';
+          const format = audioConfig.narrationAudioFormat || 'gemini_pcm';
+          const isRawPcm = format === 'gemini_pcm';
+          const ext = format === 'wav' ? 'wav' : format === 'mp3' ? 'mp3' : 'pcm';
           const buf = Buffer.from(audioConfig.narrationAudioBase64, 'base64');
-          const tmpPath = path.join(process.cwd(), 'public', 'exports', `narr_${jobId}.${isRawPcm ? 'pcm' : 'wav'}`);
+          const tmpPath = path.join(process.cwd(), 'public', 'exports', `narr_${jobId}.${ext}`);
           fs.writeFileSync(tmpPath, buf);
           narrationLocalPath = tmpPath;
           narrationIsRawPcm = isRawPcm;

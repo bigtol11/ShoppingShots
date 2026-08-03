@@ -112,8 +112,8 @@ export interface AudioConfig {
   // and carried through to /api/render-video so the final render uses real narration.
   narrationAudioBase64?: string;
   // 'gemini_pcm' = raw 16-bit PCM @24kHz mono (needs explicit ffmpeg -f s16le on render);
-  // 'wav' = a real WAV container (e.g. Typecast) that ffmpeg can read directly.
-  narrationAudioFormat?: 'gemini_pcm' | 'wav';
+  // 'wav'/'mp3' = a real, self-describing container (Typecast/ElevenLabs) ffmpeg reads directly.
+  narrationAudioFormat?: 'gemini_pcm' | 'wav' | 'mp3';
   narrationGeneratedAt?: string;
 }
 

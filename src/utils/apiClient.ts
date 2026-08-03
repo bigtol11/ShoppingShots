@@ -5,8 +5,10 @@
 export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const geminiKey = localStorage.getItem('lucy_api_gemini_key') || '';
   const youtubeKey = localStorage.getItem('lucy_api_youtube_key') || '';
+  const falKey = localStorage.getItem('lucy_api_fal_key') || '';
   const headers = new Headers(options.headers || {});
   if (geminiKey) headers.set('x-gemini-key', geminiKey);
   if (youtubeKey) headers.set('x-youtube-key', youtubeKey);
+  if (falKey) headers.set('x-fal-key', falKey);
   return fetch(url, { ...options, headers });
 }

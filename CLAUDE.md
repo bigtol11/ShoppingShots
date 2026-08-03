@@ -528,12 +528,79 @@ confirming the new route is registered and auth-gated (401). **Real YouTube
 API behavior (quota, actual result quality) unverified** — needs a real
 YouTube Data API key from the user to test.
 
+### v1.0.9 — fal.ai BYOK, real ElevenLabs TTS, key-save bug fixes
+
+User reported Gemini/Typecast keys and the admin fal.ai key "keep
+disappearing," and asked for fal.ai to become per-user BYOK (like Gemini)
+and for a real Typecast/ElevenLabs choice at TTS generation time.
+Investigated with an Explore agent before touching code:
+
+- **fal.ai admin key**: confirmed root cause, not a code bug — `serverFalKey`
+  (`server.ts`) is a bare in-memory variable with no persistence. This
+  service runs `--max-instances=1` with no `--min-instances` (scales to zero
+  when idle per `DEPLOY.md`), so every cold start is a fresh process that
+  resets to whatever `FAL_KEY` env var was set at the last deploy, silently
+  discarding anything saved through the admin UI since. `GET
+  /api/admin/fal-key/status` was correctly reporting this each time, not
+  lying — the key really was gone.
+- **Gemini/Typecast keys**: no code path clears `localStorage` other than
+  the explicit "제거" button. Most likely explanation: `handleValidateKey`
+  only calls `localStorage.setItem` inside the success branch, and *every*
+  `/api/*` route (including `/api/settings/validate-key`) sits behind
+  `requireUser` — if the session cookie is missing/expired, the save
+  silently never happens, and the generic error message could go unnoticed.
+  Confirmed `JWT_SECRET` **is** actually set on the live Cloud Run service
+  (checked via `gcloud run services describe`), ruling out the scarier
+  "secret regenerates every cold start" theory.
+
+**Fixes**:
+- **fal.ai converted to BYOK**: new `getUserFalKey()` (header `x-fal-key`,
+  same priority order as Gemini — user key first, then
+  env/admin-panel shared key as fallback). New personal "5. fal.ai API Key"
+  card in `SettingsView.tsx` (no live validation round-trip — fal.ai has no
+  safe read-only endpoint to check against without risking a real paid job,
+  so it's a straight length-check + save, like the admin flow already was).
+  `apiClient.ts` and `StoryboardTimelineView.tsx`'s fal.ai call sites
+  (previously plain `fetch`, now `apiFetch`) attach the header. The admin
+  panel still works as a shared fallback, description text updated to be
+  honest about the in-memory-only persistence.
+- **Real ElevenLabs TTS synthesis**: `synthesizeElevenLabsAudio()` (mirrors
+  `synthesizeTypecastAudio`, `eleven_multilingual_v2` model for Korean,
+  returns base64 MP3) wired into both `/api/tts/preview` and
+  `/api/generate-tts` — previously this branch was a stub that silently fell
+  through to Gemini. **Provider choice was already half-built**: the voice
+  list UI in `AudioStudioView.tsx` already lets the user click a Typecast or
+  ElevenLabs voice, which sets `audioConfig.voice_provider` — the actual bug
+  was `handleGenerateAllTts` never sending `elevenlabsKey` in the request
+  body (only `typecastKey`), so selecting an ElevenLabs voice would fail
+  even with a valid key registered. Fixed, plus added a status line showing
+  which voice/provider is currently selected before the generate button.
+- **Render pipeline mp3 support**: the narration-format branch in
+  `/api/render-video` used to treat anything that wasn't `'wav'` as raw PCM
+  needing `-f s16le` — would have corrupted ElevenLabs' real MP3 output.
+  Now explicitly checks `format === 'gemini_pcm'` for the raw-PCM path;
+  `'wav'`/`'mp3'` are both self-describing containers ffmpeg reads directly.
+  `AudioConfig.narrationAudioFormat` type extended to include `'mp3'`.
+- **Session-expiry UX**: `SettingsView.handleValidateKey` now special-cases
+  HTTP 401 with an explicit "다시 로그인해 주세요" message instead of a generic
+  error, so a silently-failed save (session expired) doesn't look identical
+  to "the key just vanished."
+
+Verified with `npx tsc --noEmit` (clean), local dev boot, and curl smoke
+tests confirming `/api/settings/validate-key` and `/api/generate-tts` both
+still correctly 401 without auth.
+
 ## Next session — pick up here
 
 1. **Nothing since v1.0.6 has been deployed** — v1.0.6 is live, but v1.0.7
-   (benchmark-video reverse-engineering) and v1.0.8 (YouTube discovery panel)
-   are both only committed locally. Ask whether to deploy before doing
-   anything else.
+   (benchmark-video reverse-engineering), v1.0.8 (YouTube discovery panel),
+   and v1.0.9 (fal.ai BYOK, real ElevenLabs TTS, key-save bug fixes) are all
+   only committed locally. Ask whether to deploy before doing anything else.
+   v1.0.9 in particular directly fixes bugs the user actively hit, so it's
+   probably the most urgent to get live.
+1b. **v1.0.9's real ElevenLabs synthesis and fal.ai BYOK are both untested
+   against live APIs** — need a real ElevenLabs key + real fal.ai key from
+   the user to confirm end-to-end.
 2. **v1.0.7's benchmark-video pipeline is entirely untested with real data**
    — this is the most complex thing built so far (Gemini Files API + video
    understanding + a 2-stage fal.ai composite). Test with a real short MP4 +

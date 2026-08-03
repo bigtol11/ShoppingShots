@@ -289,7 +289,8 @@ export const AudioStudioView: React.FC<AudioStudioViewProps> = ({
           text: fullNarration,
           voiceName: audioConfig.voice_id,
           voiceProvider: audioConfig.voice_provider || 'gemini',
-          typecastKey: localStorage.getItem('lucy_api_typecast_key') || ''
+          typecastKey: localStorage.getItem('lucy_api_typecast_key') || '',
+          elevenlabsKey: localStorage.getItem('lucy_api_elevenlabs_key') || ''
         })
       });
 
@@ -308,16 +309,17 @@ export const AudioStudioView: React.FC<AudioStudioViewProps> = ({
       onUpdateScenes(recalculateTimecodes(updatedScenes));
 
       if (data?.audioBase64) {
+        const format: 'wav' | 'mp3' | 'gemini_pcm' = data.audioFormat === 'wav' ? 'wav' : data.audioFormat === 'mp3' ? 'mp3' : 'gemini_pcm';
         onUpdateAudioConfig({
           ...audioConfig,
           narrationAudioBase64: data.audioBase64,
-          narrationAudioFormat: data.audioFormat === 'wav' ? 'wav' : 'gemini_pcm',
+          narrationAudioFormat: format,
           narrationGeneratedAt: new Date().toISOString()
         });
         // Gemini's format is raw PCM with no container, which <audio>/data-URI playback can't
-        // decode directly — only attempt browser playback for real containerized audio (WAV).
-        if (data.audioFormat === 'wav') {
-          const audio = new Audio(`data:audio/wav;base64,${data.audioBase64}`);
+        // decode directly — only attempt browser playback for real containerized audio (WAV/MP3).
+        if (format === 'wav' || format === 'mp3') {
+          const audio = new Audio(`data:audio/${format === 'wav' ? 'wav' : 'mp3'};base64,${data.audioBase64}`);
           audio.play().catch(() => {});
         }
       } else if ('speechSynthesis' in window) {
@@ -688,6 +690,11 @@ export const AudioStudioView: React.FC<AudioStudioViewProps> = ({
 
           {/* Batch Generate Actions */}
           <div className="space-y-2">
+            <p className="text-[11px] text-slate-400 text-center">
+              현재 선택된 보이스: <span className="text-purple-300 font-semibold">{audioConfig.voice_name}</span>
+              {' '}({audioConfig.voice_provider === 'typecast' ? '타입캐스트' : audioConfig.voice_provider === 'elevenlabs' ? 'ElevenLabs' : 'Gemini'}) —
+              위에서 다른 성우를 선택하면 다음 생성부터 그 성우로 적용됩니다.
+            </p>
             <button
               onClick={handleGenerateAllTts}
               disabled={isGeneratingTts}

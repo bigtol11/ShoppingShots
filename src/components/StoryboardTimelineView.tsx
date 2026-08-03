@@ -109,7 +109,7 @@ export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
           aiPrompt = promptData?.data?.veoPrompt || aiPrompt;
         }
 
-        const videoRes = await fetch('/api/generate/video', {
+        const videoRes = await apiFetch('/api/generate/video', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -177,7 +177,7 @@ export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
     setIsGeneratingFalVideo(true);
     setFalVideoError(null);
     try {
-      const response = await fetch('/api/generate/video', {
+      const response = await apiFetch('/api/generate/video', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

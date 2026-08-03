@@ -28,6 +28,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
   const [typecastKey, setTypecastKey] = useState('');
   const [elevenlabsKey, setElevenlabsKey] = useState('');
   const [youtubeKey, setYoutubeKey] = useState('');
+  const [myFalKey, setMyFalKey] = useState('');
+  const [myFalStatus, setMyFalStatus] = useState<{ loading: boolean; message: string | null; isSuccess: boolean }>({
+    loading: false,
+    message: null,
+    isSuccess: false
+  });
 
   const [geminiStatus, setGeminiStatus] = useState<{ loading: boolean; message: string | null; isSuccess: boolean }>({
     loading: false,
@@ -136,11 +142,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
     const savedTypecast = localStorage.getItem('lucy_api_typecast_key') || '';
     const savedElevenLabs = localStorage.getItem('lucy_api_elevenlabs_key') || '';
     const savedYoutube = localStorage.getItem('lucy_api_youtube_key') || '';
+    const savedMyFal = localStorage.getItem('lucy_api_fal_key') || '';
 
     setGeminiKey(savedGemini);
     setTypecastKey(savedTypecast);
     setElevenlabsKey(savedElevenLabs);
     setYoutubeKey(savedYoutube);
+    setMyFalKey(savedMyFal);
+    if (savedMyFal) {
+      setMyFalStatus({ loading: false, message: '내 fal.ai 키가 연동되어 있습니다.', isSuccess: true });
+    }
 
     if (savedGemini) {
       setGeminiStatus({ loading: false, message: '내 Gemini API 키가 연동되어 있습니다.', isSuccess: true });
@@ -201,12 +212,41 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
         setStatus({ loading: false, message: data.message, isSuccess: true });
         localStorage.setItem(storageKey, keyToValidate);
         if (onSettingsUpdated) onSettingsUpdated();
+      } else if (res.status === 401) {
+        // Distinguish "session expired, key was never saved" from "key itself is invalid" —
+        // otherwise this looks exactly like "I entered my key and it disappeared" when really
+        // it silently never reached localStorage.setItem at all.
+        setStatus({
+          loading: false,
+          message: '⚠️ 로그인 세션이 만료되어 저장되지 않았습니다. 우측 상단에서 Google 로그인을 다시 진행한 후 이 키를 다시 저장해 주세요.',
+          isSuccess: false
+        });
       } else {
         setStatus({ loading: false, message: data.message || '인증 실패', isSuccess: false });
       }
     } catch (err) {
-      setStatus({ loading: false, message: '서버 연결 실패', isSuccess: false });
+      setStatus({ loading: false, message: '서버 연결 실패 — 네트워크 상태를 확인하고 다시 시도해 주세요.', isSuccess: false });
     }
+  };
+
+  // fal.ai has no safe read-only endpoint to round-trip validate against (unlike the
+  // list-voices/list-models endpoints the other providers use) without risking a real
+  // paid job — so this just does a format check and saves directly, same as the
+  // admin-panel flow already does.
+  const handleSaveMyFalKey = () => {
+    if (!myFalKey || myFalKey.trim().length < 8) {
+      setMyFalStatus({ loading: false, message: '유효한 fal.ai API 키를 입력하세요. (최소 8자 이상)', isSuccess: false });
+      return;
+    }
+    localStorage.setItem('lucy_api_fal_key', myFalKey.trim());
+    setMyFalStatus({ loading: false, message: '내 fal.ai 키가 저장되었습니다. 이제부터 AI 영상 생성에 내 키가 사용됩니다.', isSuccess: true });
+    if (onSettingsUpdated) onSettingsUpdated();
+  };
+
+  const handleClearMyFalKey = () => {
+    localStorage.removeItem('lucy_api_fal_key');
+    setMyFalKey('');
+    setMyFalStatus({ loading: false, message: '내 키를 제거했습니다. 이제 공유 기본 키를 사용합니다(설정된 경우).', isSuccess: false });
   };
 
   const handleClearGeminiKey = () => {
@@ -488,6 +528,62 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
                 </p>
               )}
             </div>
+
+            {/* fal.ai API Key Card (per-user) */}
+            <div className="bg-[#1a172e] border border-fuchsia-800/40 p-4 rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-fuchsia-300 block">5. fal.ai API Key (AI 영상 생성)</span>
+                  <span className="text-[11px] text-slate-400">스토리보드 AI 영상 클립 생성에 사용 — 내 키를 등록하면 내 사용량으로만 청구됩니다</span>
+                </div>
+                {myFalStatus.isSuccess ? (
+                  <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-bold flex items-center space-x-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    <span>내 키 사용 중</span>
+                  </span>
+                ) : (
+                  <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded font-bold">
+                    미등록 (공유 기본 키 사용, 설정된 경우)
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="password"
+                  value={myFalKey}
+                  onChange={(e) => setMyFalKey(e.target.value)}
+                  placeholder="fal.ai API Key"
+                  className="flex-1 bg-[#100d21] border border-[#393163] focus:border-fuchsia-500 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-600 outline-none font-mono"
+                />
+                <button
+                  onClick={handleSaveMyFalKey}
+                  className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold px-3.5 py-2 rounded-lg text-xs transition flex items-center space-x-1 min-h-[36px]"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-fuchsia-100" />
+                  <span>저장</span>
+                </button>
+                {myFalStatus.isSuccess && (
+                  <button
+                    onClick={handleClearMyFalKey}
+                    title="내 키 제거하고 공유 기본 키로 되돌리기"
+                    className="bg-[#211c3a] hover:bg-[#2b254a] text-slate-300 border border-[#3b3260] px-3 py-2 rounded-lg text-xs transition min-h-[36px]"
+                  >
+                    제거
+                  </button>
+                )}
+              </div>
+
+              {myFalStatus.message && (
+                <p className={`text-[11px] font-mono p-2 rounded border ${
+                  myFalStatus.isSuccess
+                    ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-300'
+                    : 'bg-amber-950/60 border-amber-800/60 text-amber-300'
+                }`}>
+                  {myFalStatus.message}
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Admin Exclusive: fal.ai System API Key Section */}
@@ -496,7 +592,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
               <div className="flex items-center justify-between border-b border-[#2d284a] pb-3">
                 <div className="flex items-center space-x-2">
                   <ShieldCheck className="w-4 h-4 text-purple-400" />
-                  <h2 className="text-sm font-bold text-white">🛡️ 시스템 관리자 - fal.ai API Key 설정</h2>
+                  <h2 className="text-sm font-bold text-white">🛡️ 시스템 관리자 - fal.ai 공유 기본 키 설정</h2>
                 </div>
                 {falConfigured ? (
                   <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-bold flex items-center space-x-1">
@@ -514,7 +610,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsUpdated })
                 <div>
                   <span className="text-xs font-bold text-purple-300 block">Server-to-Server fal.ai Video Engine Key</span>
                   <span className="text-[11px] text-slate-400">
-                    클라이언트에 절대 노출되지 않으며, 백엔드('/api/generate/video')에서 직접 연동됩니다.
+                    자신의 키를 등록하지 않은 사용자에게 적용되는 공유 기본 키입니다. 클라이언트에 절대 노출되지 않으며,
+                    백엔드('/api/generate/video')에서 직접 연동됩니다. 서버 재시작 시 사라질 수 있으니 배포 시
+                    `FAL_KEY` 환경변수로 함께 설정하는 것을 권장합니다.
                   </span>
                 </div>
 
