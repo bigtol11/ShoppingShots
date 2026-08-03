@@ -736,9 +736,84 @@ cleaner look while narrow phones can still swipe-scroll it).
 
 Verified with `npx tsc --noEmit` (clean), local dev boot.
 
+### v1.1.4 — Fixed real hallucination bug: product analysis was inventing unrelated products for URL-only input
+
+**User caught a serious correctness bug with a screenshot**: pasted a real
+Coupang link for sunglasses/swim goggles, clicked "URL 수집 실행", and got
+back completely unrelated vacuum-cleaner keywords/category
+("차량용품/청소용품/소형가전", "#무선청소기" etc.) reported as a cheerful
+"분석 완료!" success. Root-caused with certainty (read the actual code, not
+guessed):
+
+- `/api/analyze-product` and `/api/gemini-pipeline-v2` never fetched the URL
+  at all — they just embedded the raw URL *string* in the Gemini prompt and
+  asked it to analyze "the product," with zero real page content. Given
+  nothing to ground on, Gemini fabricated a plausible-sounding but entirely
+  wrong product.
+- The intended safety guard (`!productJson` → reject) could never fire: the
+  frontend's `handleAnalyze` always sends `productJson: dataToAnalyze ||
+  productInfo`, and `productInfo` is always a real (if mostly-empty) object
+  from `makeEmptyProject()` — so `productJson` was truthy on every single
+  call, dead code from day one.
+- Separately, `/api/analyze-product`'s catch block returned a **fabricated
+  generic fallback** ("일반 생활용품" / hardcoded fake facts) disguised as
+  `status: 'success'` on any real error — same class of bug, different
+  trigger.
+
+**Fix**: new `fetchUrlMetadata()` (`server.ts`) does a real server-side
+fetch of the product URL (follows redirects, so short links like
+`link.coupang.com/a/...` resolve) and reads `<title>`/`og:title`/
+`og:description` — the same tags every shopping site already publishes for
+link-preview cards (Kakao/Slack/iMessage do exactly this), so this is
+squarely legitimate, not scraping. New `resolveProductContext()` shared by
+both endpoints: computes real signal strength (name/JSON/rawText/URL
+metadata), and when a bare URL is the *only* input, **requires the metadata
+fetch to succeed** — on failure, returns an honest 422 instead of letting
+Gemini guess. The fetched page title/description get injected into the
+prompt with an explicit "don't invent anything beyond this" instruction.
+Fixed the dishonest catch-block fallback in `/api/analyze-product` to
+return a real error too.
+
+**Important finding from live testing, not a guess**: directly curl-tested
+the user's exact Coupang link — **Coupang's Akamai bot-protection returns a
+hard 403 "Access Denied" to server-side requests regardless of User-Agent/
+Accept headers.** The short link *does* resolve (redirect works), but the
+actual product page fetch is blocked outright. This means URL-only
+auto-analysis will **essentially never work for real Coupang links** — this
+isn't a bug to keep chasing, it's a permanent block from Coupang's side.
+Response: (1) the new code correctly falls back to an honest, specific error
+for Coupang links ("쿠팡은 서버가 자동으로 페이지를 읽는 것을 차단하고 있어...")
+steering straight to the screenshot tab, which sidesteps the block entirely
+since it's the user's own browser rendering the page; (2) added a proactive
+warning directly under the URL input in `ProductImportView.tsx` so the user
+doesn't have to hit the error first. The metadata fetch still has real value
+for non-Coupang sites without this level of bot protection.
+
+Also fixed the frontend never applying `analyzedFacts.product_name`/`price`
+to `productInfo` (only category/facts/etc. were merged — this is why the
+screenshot showed a blank product name even before the hallucination was
+visible), and added a "확인된 핵심 팩트" preview card directly on the input
+screen (`ProductImportView.tsx`) showing the actual verified facts so the
+user can catch a misidentified product immediately instead of only finding
+out after navigating to the separate fact-check screen or, worse, script
+generation.
+
+Verified with `npx tsc --noEmit` (clean), local dev boot, both touched
+endpoints still 401-gated without auth. The Akamai-block finding above was
+verified with a real `curl` test against the user's actual URL (see this
+session's transcript) — not simulated.
+
 ## Next session — pick up here
 
-1. **v1.1.3 has not been visually confirmed on a real device** — only
+1. **v1.1.4's product-analysis grounding fix needs real user confirmation**:
+   (a) a Coupang URL should now show the specific "쿠팡은 차단..." error
+   instead of hallucinating — confirm the user actually sees this and
+   understands to switch to the screenshot tab; (b) try a non-Coupang
+   shopping URL (11번가, 네이버쇼핑) to see if the real metadata-grounding
+   path works better there since they don't have Coupang's Akamai block;
+   (c) confirm the screenshot-upload path (already existed, unaffected by
+   this bug) still correctly identifies the right product end-to-end.
+2. **v1.1.3 has not been visually confirmed on a real device** — only
    type-checked/boot-tested; the user is testing live right after this
    deploy, so their next message is the real signal.
 2. **v1.1.1's shopping-ranking search scoping and velocity sort are

@@ -288,6 +288,130 @@ function isSafePublicHttpUrl(urlStr: string): boolean {
   }
 }
 
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&nbsp;/g, ' ');
+}
+
+// Reads a product page's <title>/og:title/og:description — the same tags every shopping
+// site already publishes for link-preview cards (Kakao/Slack/iMessage do exactly this).
+// This is how the app grounds product analysis in the REAL page instead of asking Gemini
+// to guess from a bare URL string, which was silently hallucinating unrelated products
+// (e.g. a sunglasses link returning vacuum-cleaner facts) because it had nothing real to
+// go on. Follows redirects so short links (link.coupang.com/a/...) resolve to the real page.
+async function fetchUrlMetadata(url: string): Promise<{ title: string; ogTitle: string; description: string; ogDescription: string } | null> {
+  if (!isSafePublicHttpUrl(url)) return null;
+  try {
+    const res = await fetch(url, {
+      redirect: 'follow',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+    if (!res.ok) return null;
+    // Product pages can be large — only read enough to cover <head>, no need for the full body.
+    const reader = res.body?.getReader();
+    let html = '';
+    if (reader) {
+      const decoder = new TextDecoder();
+      let bytesRead = 0;
+      const maxBytes = 200_000;
+      while (bytesRead < maxBytes) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        html += decoder.decode(value, { stream: true });
+        bytesRead += value.length;
+      }
+      reader.cancel().catch(() => {});
+    } else {
+      html = await res.text();
+    }
+
+    const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+    const ogTitleMatch = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["']/i) || html.match(/<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:title["']/i);
+    const ogDescMatch = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["']/i) || html.match(/<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:description["']/i);
+    const descMatch = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i) || html.match(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i);
+
+    return {
+      title: decodeHtmlEntities(titleMatch?.[1]?.trim() || ''),
+      ogTitle: decodeHtmlEntities(ogTitleMatch?.[1]?.trim() || ''),
+      description: decodeHtmlEntities(descMatch?.[1]?.trim() || ''),
+      ogDescription: decodeHtmlEntities(ogDescMatch?.[1]?.trim() || '')
+    };
+  } catch (err) {
+    console.warn('[URL Metadata Fetch Warning]', err);
+    return null;
+  }
+}
+
+interface ProductContextResult {
+  ok: boolean;
+  errorMessage?: string;
+  contextText: string;
+}
+
+// Shared by /api/analyze-product and /api/gemini-pipeline-v2 — decides whether there's
+// enough real signal to analyze safely. If only a bare URL was given (the common case:
+// user pastes a Coupang link and clicks "URL 수집 실행" without also filling JSON/name),
+// fetches real page metadata to ground the analysis. If that fails too, returns ok:false
+// so the caller can return an honest error instead of letting Gemini hallucinate a
+// plausible-looking but unrelated product from nothing.
+async function resolveProductContext(
+  productName: string | undefined,
+  productUrl: string | undefined,
+  productJson: any,
+  rawText: string | undefined
+): Promise<ProductContextResult> {
+  const hasNameSignal = Boolean(productName && productName !== '수집된 쿠팡 상품');
+  const hasJsonSignal = Boolean(
+    productJson && (productJson.product_name || (Array.isArray(productJson.verified_facts) && productJson.verified_facts.length > 0))
+  );
+  const hasRawTextSignal = Boolean(rawText && rawText.trim());
+
+  if (!productUrl || hasNameSignal || hasJsonSignal || hasRawTextSignal) {
+    // Either no URL to enrich from, or real signal already exists elsewhere — still try to
+    // enrich with page metadata opportunistically, but never block on it failing here.
+    if (productUrl) {
+      const meta = await fetchUrlMetadata(productUrl);
+      const effectiveTitle = meta?.ogTitle || meta?.title || '';
+      if (effectiveTitle) {
+        return {
+          ok: true,
+          contextText: `\n[웹페이지에서 확인된 참고 정보]\n- 페이지 제목: ${effectiveTitle}\n- 페이지 설명: ${meta?.ogDescription || meta?.description || ''}\n`
+        };
+      }
+    }
+    return { ok: true, contextText: '' };
+  }
+
+  // URL-only case — this MUST succeed at fetching real metadata, or we refuse rather than guess.
+  const meta = await fetchUrlMetadata(productUrl);
+  const effectiveTitle = meta?.ogTitle || meta?.title || '';
+  if (!meta || !effectiveTitle) {
+    // Confirmed by direct testing: Coupang's Akamai bot-protection returns a hard 403
+    // "Access Denied" to server-side requests regardless of headers — this is not a bug
+    // to keep chasing, it's a permanent block. Steer Coupang links straight to the
+    // screenshot tab, which sidesteps this entirely since the user's own browser renders it.
+    const isCoupang = /coupang\.com|coupa\.ng/i.test(productUrl);
+    return {
+      ok: false,
+      contextText: '',
+      errorMessage: isCoupang
+        ? '쿠팡은 서버가 자동으로 페이지를 읽는 것을 차단하고 있어 URL만으로는 상품을 인식할 수 없습니다. "📷 스크린샷 업로드" 탭에서 상품 페이지를 캡처해서 올려주세요 — 이 경우 항상 정확하게 인식됩니다.'
+        : '입력하신 URL에서 상품 정보를 자동으로 읽어오지 못했습니다 (쇼핑몰이 접근을 차단했거나 정보가 없는 링크일 수 있습니다). "스크린샷 업로드" 탭으로 상품 페이지를 캡처해서 올리시거나, "상품 JSON" 탭에 직접 입력해 주세요.'
+    };
+  }
+  return {
+    ok: true,
+    contextText: `\n[웹페이지에서 실제로 확인된 정보 — 이 내용에 없는 스펙/사양/브랜드는 절대 지어내지 마세요]\n- 페이지 제목: ${effectiveTitle}\n- 페이지 설명: ${meta.ogDescription || meta.description || ''}\n`
+  };
+}
+
 // Admin auth gate: fails closed unless ADMIN_SECRET is explicitly configured on the server
 // Admin gate reuses the already-established login session (requireUser runs first on every
 // /api/* route, see the global gate above) — no separate admin password to manage. Whoever's
@@ -442,12 +566,9 @@ app.post('/api/gemini-pipeline-v2', async (req, res) => {
   try {
     const { productName, productUrl, productJson, rawText } = req.body;
 
-    // Check if input is empty or url only without actual content
-    if (productUrl && (!productName || productName === '수집된 쿠팡 상품') && !productJson && !rawText) {
-      return res.status(400).json({
-        status: 'error',
-        message: '정확한 URL 데이터를 가져오지 못했습니다. 크롬 확장 프로그램 수집기 또는 JSON 직접 입력을 이용해 주세요.'
-      });
+    const context = await resolveProductContext(productName, productUrl, productJson, rawText);
+    if (!context.ok) {
+      return res.status(422).json({ status: 'error', message: context.errorMessage });
     }
 
     const ai = getGeminiClient(getUserGeminiKey(req));
@@ -458,7 +579,7 @@ app.post('/api/gemini-pipeline-v2', async (req, res) => {
 - 상품 URL: ${productUrl || ''}
 - 추가 입력/후기 텍스트: ${rawText || ''}
 - 상품 JSON 데이터: ${productJson ? JSON.stringify(productJson) : ''}
-
+${context.contextText}
 위 데이터를 바탕으로 팩트검증(fact_check), 썸네일 기획(thumbnail), 대본 타임라인(script_timeline)을 생성하십시오.
 `;
 
@@ -566,31 +687,30 @@ app.post('/api/analyze-product', async (req, res) => {
   try {
     const { productName, productUrl, productJson, rawText } = req.body;
 
-    if (productUrl && (!productName || productName === '수집된 쿠팡 상품') && !productJson && !rawText) {
-      return res.status(400).json({
-        status: 'error',
-        message: '정확한 URL 데이터를 가져오지 못했습니다. 크롬 확장 프로그램 수집기 또는 JSON 직접 입력을 이용해 주세요.'
-      });
+    const context = await resolveProductContext(productName, productUrl, productJson, rawText);
+    if (!context.ok) {
+      return res.status(422).json({ status: 'error', message: context.errorMessage });
     }
 
     const ai = getGeminiClient(getUserGeminiKey(req));
 
     const prompt = `
-제공된 상품 정보(상품명, JSON, 상세설명)를 분석하여 거짓/환각(hallucination)이 없는 팩트 데이터와 쇼핑쇼츠 제작 가이드를 작성하세요.
+제공된 상품 정보(상품명, JSON, 상세설명)를 분석하여 거짓/환각(hallucination)이 없는 팩트 데이터와 쇼핑쇼츠 제작 가이드를 작성하세요. 실제로 확인되지 않는 스펙이나 카테고리는 절대 지어내지 마세요 — 확실하지 않으면 category_facts/verified_facts를 보수적으로, 일반론 수준으로만 작성하세요.
 
 [상품명/정보]
 ${productName || ''}
 ${productUrl || ''}
 ${rawText || ''}
 ${productJson ? JSON.stringify(productJson) : ''}
-
+${context.contextText}
 반드시 JSON 형태로 응답하세요.
+- product_name: 위 정보에서 확인된 정확한 상품명 (이미 상품명이 주어졌다면 그대로, 웹페이지 제목에서 확인했다면 그 이름을 사용)
 - verified_facts: 실제 확인 가능한 사실 (claim, source, safe_wording)
 - category_facts: 일반적인 제품군 정보
 - use_cases: 활용 상황 (3개 이상)
 - visual_features: 시각적으로 보여주기 좋은 포인트 (3개 이상)
 - prohibited_claims: 과장광고 위험 금지 표현 (2개 이상)
-- search_terms: 한국어(ko), 중국어(zh), 영어(en) 검색어 목록
+- search_terms: 한국어(ko), 중국어(zh), 영어(en) 검색어 목록 — 반드시 실제 상품명/카테고리와 관련된 키워드만
 - review_summary_points: 주요 후기 요약 포인트
 `;
 
@@ -608,31 +728,9 @@ ${productJson ? JSON.stringify(productJson) : ''}
     res.json({ status: 'success', data: parsed });
   } catch (err: any) {
     console.error('[Analyze Product Error]', err);
-    res.json({
-      status: 'success',
-      data: {
-        category_name: '일반 생활용품',
-        verified_facts: [
-          {
-            claim_id: 'C01',
-            claim: req.body.productName || '입력된 상품의 핵심 기능',
-            status: 'VERIFIED',
-            source: '사용자 입력 상세정보',
-            safe_wording: '확인된 상품 명세와 사용 목적을 구체적으로 전달'
-          }
-        ],
-        category_facts: ['해당 카테고리 제품군의 일반적인 유용성 및 필요성'],
-        use_cases: ['일상 생활 중 필요할 때', '야외 활동 시 편리함 제공'],
-        visual_features: ['상품 외관 클로즈업', '실제 작동 또는 사용 모습'],
-        prohibited_claims: ['실제 써보지 않았는데 내가 직접 써봤다는 거짓 주장', '의학적/치료적 과장 효과'],
-        search_terms: {
-          ko: [req.body.productName || '쇼핑쇼츠 상품', '생활꿀팁', '추천템'],
-          zh: ['推荐好物', '实用生活用品'],
-          en: ['useful gadget', 'daily item']
-        },
-        review_summary_points: ['사용 편의성이 훌륭함', '디자인과 가격 대비 가성비가 만족스러움']
-      }
-    });
+    // Honest failure — a fabricated generic fallback here would silently feed wrong data
+    // into the rest of the pipeline (exactly the bug this whole endpoint was rewritten to fix).
+    res.status(500).json({ status: 'error', message: '상품 분석에 실패했습니다. 다시 시도하거나 JSON/스크린샷 입력을 이용해 주세요.' });
   }
 });
 

@@ -172,6 +172,9 @@ export const ProductImportView: React.FC<ProductImportViewProps> = ({
         onUpdateProductInfo({
           ...productInfo,
           ...dataToAnalyze,
+          product_name: analyzedFacts.product_name || dataToAnalyze?.product_name || productInfo.product_name,
+          price: analyzedFacts.price || productInfo.price,
+          source_url: urlInput || productInfo.source_url,
           category_name: analyzedFacts.category_name || productInfo.category_name,
           verified_facts: analyzedFacts.verified_facts || productInfo.verified_facts,
           category_facts: analyzedFacts.category_facts || productInfo.category_facts,
@@ -180,12 +183,14 @@ export const ProductImportView: React.FC<ProductImportViewProps> = ({
           prohibited_claims: analyzedFacts.prohibited_claims || productInfo.prohibited_claims,
           search_terms: analyzedFacts.search_terms || productInfo.search_terms
         });
+        setImportStatus(`✅ '${(analyzedFacts.product_name || dataToAnalyze?.product_name || productInfo.product_name || '').slice(0, 30)}' 분석 완료 — 아래에서 결과를 확인하세요.`);
+      } else {
+        setImportStatus('v2.1 Gemini 팩트체크 & 숏폼 파이프라인 분석 완료!');
       }
 
       if (res2?.data) {
         setPipelineV2(res2.data);
       }
-      setImportStatus('v2.1 Gemini 팩트체크 & 숏폼 파이프라인 분석 완료!');
     } catch (err) {
       console.error(err);
       setErrorMessage('정확한 URL 데이터를 가져오지 못했습니다. 크롬 확장 프로그램 수집기 또는 JSON 직접 입력을 이용해 주세요.');
@@ -325,6 +330,10 @@ export const ProductImportView: React.FC<ProductImportViewProps> = ({
 
                   <p className="text-[11px] text-slate-500 leading-relaxed pt-1">
                     * 사용자가 직접 판매/홍보하려는 실제 쿠팡 파트너스 또는 쇼핑몰 URL을 입력창에 넣고 <strong className="text-purple-300 font-normal">URL 수집 실행</strong> 버튼을 눌러주시면 됩니다.
+                  </p>
+                  <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                    ⚠️ 쿠팡은 서버의 자동 페이지 읽기를 차단하고 있어 URL만으로는 상품 인식이 안 될 수 있습니다.
+                    이 경우 <strong className="font-semibold">"📷 스크린샷 업로드"</strong> 탭을 이용하시면 항상 정확하게 인식됩니다.
                   </p>
                 </div>
               )}
@@ -496,12 +505,36 @@ export const ProductImportView: React.FC<ProductImportViewProps> = ({
                   현재 로드된 상품 정보
                 </span>
                 <h3 className="text-sm font-bold text-white mt-1 leading-snug">
-                  {productInfo.product_name}
+                  {productInfo.product_name || (
+                    <span className="text-amber-400 font-normal">아직 분석된 상품이 없습니다 — 왼쪽에서 URL 수집/JSON/스크린샷 중 하나를 실행해 주세요.</span>
+                  )}
                 </h3>
                 <p className="text-xs text-emerald-400 font-semibold mt-1">
                   {productInfo.price || '가격 정보 보유'} ({productInfo.category_name})
                 </p>
               </div>
+
+              {/* Analysis result preview — lets the user actually verify the analysis
+                  identified the right product before moving on to script generation. */}
+              {productInfo.verified_facts && productInfo.verified_facts.length > 0 && (
+                <div className="space-y-2 bg-[#121020] border border-emerald-900/40 p-3 rounded-xl">
+                  <h4 className="text-xs font-bold text-emerald-300 flex items-center space-x-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>확인된 핵심 팩트 ({productInfo.verified_facts.length}건)</span>
+                  </h4>
+                  <ul className="space-y-1.5 text-[11px] text-slate-300">
+                    {productInfo.verified_facts.slice(0, 3).map((f, i) => (
+                      <li key={i} className="flex items-start space-x-1.5">
+                        <span className="text-emerald-400 shrink-0">✓</span>
+                        <span>{f.claim}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-[10px] text-slate-500 pt-1 border-t border-[#272147]">
+                    상품이 잘못 인식되었다면 아래 "2단계" 진행 전에 JSON 직접 입력 또는 스크린샷 업로드로 다시 시도해 주세요.
+                  </p>
+                </div>
+              )}
 
               {/* Multilingual Search Terms Box */}
               <div className="space-y-3">
