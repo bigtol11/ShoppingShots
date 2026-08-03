@@ -72,6 +72,13 @@ export interface SceneItem {
   ken_burns_motion?: 'ZOOM_IN' | 'PAN_LEFT' | 'PAN_RIGHT' | 'PAN_UP' | 'NONE';
   effect_sound?: string;
   ai_prompt?: string;
+  // Still-image compositing prompt (background/lighting/composition only, product excluded)
+  // produced by /api/analyze-benchmark-video — consumed by
+  // /api/generate-benchmark-reference-image before the ai_prompt motion step runs.
+  fal_reference_prompt?: string;
+  // The user's real product photo (already uploaded, stored URL) that
+  // /api/generate-benchmark-reference-image composites into fal_reference_prompt's scene.
+  product_reference_image_url?: string;
   media_url?: string;
   custom_audio_url?: string;
   tts_generated?: boolean;

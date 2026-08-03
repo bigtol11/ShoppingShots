@@ -347,6 +347,7 @@ export default function App() {
                   onNextStep={() => handleNextStepFrom('storyboard')}
                   scriptText={project.scripts.find((s) => s.id === project.selectedScriptId)?.full_text}
                   targetDuration={project.targetDuration}
+                  productName={project.productInfo.product_name}
                 />
               )}
 

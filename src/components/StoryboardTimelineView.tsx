@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SceneItem, ClipCandidate, SourceGrade } from '../types';
 import { apiFetch } from '../utils/apiClient';
+import { BenchmarkVideoAnalyzerView } from './BenchmarkVideoAnalyzerView';
 import {
   Film,
   Play,
@@ -21,7 +22,8 @@ import {
   ArrowUpDown,
   MoveUp,
   MoveDown,
-  Maximize2
+  Maximize2,
+  Target
 } from 'lucide-react';
 
 interface StoryboardTimelineViewProps {
@@ -31,6 +33,7 @@ interface StoryboardTimelineViewProps {
   onNextStep: () => void;
   scriptText?: string;
   targetDuration?: number;
+  productName?: string;
 }
 
 export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
@@ -39,8 +42,10 @@ export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
   onUpdateScenes,
   onNextStep,
   scriptText,
-  targetDuration = 18
+  targetDuration = 18,
+  productName
 }) => {
+  const [isBenchmarkAnalyzerOpen, setIsBenchmarkAnalyzerOpen] = useState(false);
   const [selectedSceneId, setSelectedSceneId] = useState<string>(scenes[0]?.scene_id || 'S01');
   const [isGeneratingAiPrompt, setIsGeneratingAiPrompt] = useState(false);
   const [isGeneratingFalVideo, setIsGeneratingFalVideo] = useState(false);
@@ -74,6 +79,26 @@ export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
       setBulkProgress({ current: i + 1, total: targets.length });
       try {
         let aiPrompt = scene.ai_prompt;
+        let heroImageUrl: string | undefined;
+
+        // Benchmark-derived scene: composite the user's real product photo into the
+        // analyzed composition first, so the video-gen step has a proper starting frame
+        // instead of generating the product from a text description alone.
+        if (scene.fal_reference_prompt && scene.product_reference_image_url) {
+          const refRes = await apiFetch('/api/generate-benchmark-reference-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              productImageUrl: scene.product_reference_image_url,
+              referencePrompt: scene.fal_reference_prompt
+            })
+          });
+          const refData = await refRes.json();
+          if (refData?.status === 'success' && refData?.imageUrl) {
+            heroImageUrl = refData.imageUrl;
+          }
+        }
+
         if (!aiPrompt) {
           const promptRes = await apiFetch('/api/generate-ai-video-prompt', {
             method: 'POST',
@@ -89,7 +114,8 @@ export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt: aiPrompt || `Photorealistic 9:16 vertical commercial video clip: ${scene.required_visual}`,
-            duration: Math.round(scene.duration) || 5
+            duration: Math.round(scene.duration) || 5,
+            image_url: heroImageUrl
           })
         });
         const videoData = await videoRes.json();
@@ -406,19 +432,40 @@ export const StoryboardTimelineView: React.FC<StoryboardTimelineViewProps> = ({
           <p className="text-xs text-slate-400 max-w-md mx-auto">
             선택한 대본을 AI가 장면 단위(훅-문제제기-제품소개-사용법-CTA)로 자동 분해해 드립니다.
           </p>
-          <button
-            onClick={handleGenerateStoryboard}
-            disabled={isGeneratingStoryboard || !scriptText}
-            className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-purple-950/40 inline-flex items-center space-x-2 transition disabled:opacity-50"
-          >
-            <Wand2 className="w-4 h-4" />
-            <span>{isGeneratingStoryboard ? 'AI 스토리보드 생성 중...' : 'AI로 스토리보드 자동 생성'}</span>
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              onClick={handleGenerateStoryboard}
+              disabled={isGeneratingStoryboard || !scriptText}
+              className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-purple-950/40 inline-flex items-center space-x-2 transition disabled:opacity-50"
+            >
+              <Wand2 className="w-4 h-4" />
+              <span>{isGeneratingStoryboard ? 'AI 스토리보드 생성 중...' : 'AI로 스토리보드 자동 생성'}</span>
+            </button>
+            <button
+              onClick={() => setIsBenchmarkAnalyzerOpen(true)}
+              className="bg-[#241e45] hover:bg-[#322961] text-purple-200 border border-purple-500/30 text-xs px-5 py-2.5 rounded-xl font-bold inline-flex items-center space-x-2 transition"
+            >
+              <Target className="w-4 h-4" />
+              <span>🎯 벤치마킹 영상으로 AI 재창조</span>
+            </button>
+          </div>
           {!scriptText && (
             <p className="text-[11px] text-amber-300">먼저 3단계에서 대본을 생성/선택해야 합니다.</p>
           )}
           {storyboardError && <p className="text-[11px] text-rose-300">{storyboardError}</p>}
         </div>
+      )}
+
+      {isBenchmarkAnalyzerOpen && (
+        <BenchmarkVideoAnalyzerView
+          productName={productName}
+          onClose={() => setIsBenchmarkAnalyzerOpen(false)}
+          onApply={(newScenes) => {
+            onUpdateScenes(newScenes);
+            setSelectedSceneId(newScenes[0]?.scene_id || selectedSceneId);
+            setIsBenchmarkAnalyzerOpen(false);
+          }}
+        />
       )}
 
       {/* Left Cut Sequence List (5 Cols) */}

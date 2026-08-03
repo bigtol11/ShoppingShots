@@ -39,7 +39,10 @@ const app = express();
 // Cloud Run (and most container platforms) inject PORT and require the app to listen on it.
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json({ limit: '20mb' }));
+// 150mb accommodates base64-encoded benchmark video uploads (raw MP4 up to ~80-100mb,
+// base64 adds ~33% overhead) for /api/analyze-benchmark-video — same base64-JSON upload
+// pattern used everywhere else in this codebase, just needs more headroom for video.
+app.use(express.json({ limit: '150mb' }));
 app.use(cookieParser());
 
 // ---- Firebase Admin (Firestore + Cloud Storage), with local-file fallback ----
@@ -1141,6 +1144,146 @@ app.post(['/api/generate/video', '/api/fal/generate-video', '/api/generate-ai-vi
       status: 'error',
       message: 'AI 비디오 렌더링 엔진 응답 지연 또는 처리 실패'
     });
+  }
+});
+
+// Uploads a video Buffer to Gemini's Files API and waits for it to finish processing
+// (video understanding is async server-side, same shape as fal.ai's queue — PROCESSING
+// until Gemini finishes extracting frames, then ACTIVE once ready to reference).
+async function uploadVideoToGeminiFiles(ai: GoogleGenAI, buffer: Buffer, mimeType: string, timeoutMs = 90000): Promise<{ fileUri: string; mimeType: string }> {
+  const blob = new Blob([buffer], { type: mimeType });
+  const uploaded = await ai.files.upload({ file: blob, config: { mimeType } });
+  if (!uploaded.name) throw new Error('Gemini Files API did not return a file name');
+
+  const start = Date.now();
+  let current = uploaded;
+  while (current.state === 'PROCESSING') {
+    if (Date.now() - start > timeoutMs) throw new Error('Gemini Files API 처리 시간 초과');
+    await new Promise((r) => setTimeout(r, 2000));
+    current = await ai.files.get({ name: uploaded.name! });
+  }
+  if (current.state !== 'ACTIVE' || !current.uri) {
+    throw new Error(`Gemini Files API 처리 실패 (state: ${current.state})`);
+  }
+  return { fileUri: current.uri, mimeType: current.mimeType || mimeType };
+}
+
+// Reverse-engineers a benchmark short-form video's DIRECTION (camera movement, composition,
+// cut pacing) — never its literal pixels/frames — into a cut-by-cut breakdown that fal.ai can
+// use to recreate the same technique with the user's own product. See the system instruction
+// below for the guardrails that keep this in "unprotectable technique" territory rather than
+// "copied expression."
+const BENCHMARK_ANALYSIS_GUARDRAIL = `
+당신은 숏폼 영상의 "연출 기법"만 분석하는 전문 영상 분석가입니다. 절대 규칙:
+
+1. 브랜드 로고, 특정 캐릭터, 원본 영상에만 존재하는 고유한 시각 요소(예: 특정 인물의 얼굴,
+독자적인 캐릭터 디자인, 텍스트 그래픽의 구체적 문구)는 절대 추출하지 마세요. 그런 요소가
+보이면 완전히 무시하고, "카메라가 어떻게 움직였는지", "구도가 어떻게 짜였는지", "컷이 몇 초
+간격으로 전환됐는지", "조명이 어떤 느낌이었는지" 같은 일반화된 기법 수준으로만 추상화하세요.
+2. 이 분석 결과는 전혀 다른 상품에 적용됩니다. 원본 상품명이나 브랜드를 절대 언급하지 마세요.
+3. fal_reference_prompt와 fal_video_prompt는 "무엇이 보이는지"가 아니라 "카메라가 어떻게
+보여주는지"에 집중해서 작성하세요 — 실제 제품 이미지는 별도로 합성되므로, 여기서는 배경/조명/
+구도/카메라 움직임만 영어로 구체적으로 묘사하세요.
+4. 원본 영상에 삽입된 자막/텍스트 문구는 그대로 베끼지 말고, "이 위치에 이런 종류의 정보가
+나왔다"는 구조만 참고 정보로 남기세요.
+
+fal_video_prompt 작성 시 반드시 지킬 모션 규칙: "The scene is exactly as the reference image
+— do not change any detail."로 시작할 것. slam/plunge/explode/aggressively 같은 과격한
+동사는 절대 쓰지 말고 slowly/gently/naturally/carefully/deliberately만 사용할 것.
+`;
+
+app.post('/api/analyze-benchmark-video', async (req, res) => {
+  try {
+    const { video, productContext } = req.body as { video?: { base64: string; mimeType: string }; productContext?: string };
+    if (!video?.base64) {
+      return res.status(400).json({ status: 'error', message: '분석할 벤치마킹 영상이 없습니다.' });
+    }
+
+    const ai = getGeminiClient(getUserGeminiKey(req));
+    const base64Data = video.base64.includes(',') ? video.base64.split(',')[1] : video.base64;
+    const buffer = Buffer.from(base64Data, 'base64');
+    const mimeType = video.mimeType || 'video/mp4';
+
+    const { fileUri, mimeType: uploadedMimeType } = await uploadVideoToGeminiFiles(ai, buffer, mimeType);
+
+    const instructionText = `
+첨부된 영상을 컷 단위로 역기획하세요. ${productContext ? `[참고 - 이 분석을 적용할 실제 상품 정보]: ${productContext}` : ''}
+
+반드시 JSON 배열로 응답하세요. 각 원소는 다음 필드를 포함합니다:
+- scene_id: "B01", "B02"... 순번
+- start_sec, end_sec, suggested_duration_sec: 숫자
+- purpose: "visual_hook" | "problem_statement" | "product_reveal" | "core_mechanism" | "use_case" | "cta_loop" 중 하나
+- camera_movement: 카메라 움직임 기법 (한국어)
+- composition_notes: 구도/배치 설명 (한국어)
+- pacing_notes: 컷 전환 템포 설명 (한국어)
+- fal_reference_prompt: 정지 레퍼런스 이미지용 영어 프롬프트 (배경/조명/구도만, 제품 묘사 제외)
+- fal_video_prompt: 그 정지 이미지에 적용할 모션 영어 프롬프트 (위 모션 규칙 준수)
+`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: [{ role: 'user', parts: [{ fileData: { fileUri, mimeType: uploadedMimeType } }, { text: instructionText }] }],
+      config: {
+        systemInstruction: BENCHMARK_ANALYSIS_GUARDRAIL,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              scene_id: { type: Type.STRING },
+              start_sec: { type: Type.NUMBER },
+              end_sec: { type: Type.NUMBER },
+              suggested_duration_sec: { type: Type.NUMBER },
+              purpose: { type: Type.STRING },
+              camera_movement: { type: Type.STRING },
+              composition_notes: { type: Type.STRING },
+              pacing_notes: { type: Type.STRING },
+              fal_reference_prompt: { type: Type.STRING },
+              fal_video_prompt: { type: Type.STRING }
+            },
+            required: ['scene_id', 'purpose', 'fal_reference_prompt', 'fal_video_prompt']
+          }
+        }
+      }
+    });
+
+    const parsed = JSON.parse(response.text || '[]');
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return res.status(422).json({ status: 'error', message: '영상에서 컷을 분석하지 못했습니다. 다른 영상으로 다시 시도해 주세요.' });
+    }
+    res.json({ status: 'success', data: parsed });
+  } catch (err: any) {
+    console.error('[Analyze Benchmark Video Error]', err);
+    res.status(500).json({ status: 'error', message: '벤치마킹 영상 분석에 실패했습니다. 영상 용량을 줄이거나 다시 시도해 주세요.' });
+  }
+});
+
+// Thin wrapper around the existing I2V pre-processing pipeline (rembg -> flux composite) —
+// reused as-is, just fed a per-scene composition prompt from the benchmark analysis above
+// instead of the generic studio-lighting phrase /api/generate/video uses by default.
+app.post('/api/generate-benchmark-reference-image', async (req, res) => {
+  try {
+    const { productImageUrl, referencePrompt } = req.body as { productImageUrl?: string; referencePrompt?: string };
+    const activeKey = process.env.FAL_KEY || serverFalKey;
+
+    if (!productImageUrl || !referencePrompt) {
+      return res.status(400).json({ status: 'error', message: '제품 이미지와 레퍼런스 프롬프트가 모두 필요합니다.' });
+    }
+    if (!activeKey) {
+      return res.status(503).json({ status: 'error', message: 'fal.ai API 키가 설정되지 않았습니다.' });
+    }
+
+    const bgRemoved = await processFalRembg(productImageUrl, activeKey);
+    const composited = await processFalFluxCompositing(bgRemoved, referencePrompt, activeKey);
+
+    if (!composited || composited === productImageUrl) {
+      return res.status(502).json({ status: 'error', message: '레퍼런스 이미지 합성에 실패했습니다.' });
+    }
+    res.json({ status: 'success', imageUrl: composited });
+  } catch (err: any) {
+    console.error('[Generate Benchmark Reference Image Error]', err);
+    res.status(500).json({ status: 'error', message: '레퍼런스 이미지 생성 중 오류가 발생했습니다.' });
   }
 });
 

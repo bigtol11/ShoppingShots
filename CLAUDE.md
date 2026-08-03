@@ -422,22 +422,89 @@ to scope the legitimate alternative, approved and implemented same session:
 
 Verified with `npx tsc --noEmit` (clean), local dev boot, and a curl smoke
 test confirming `/api/analyze-product-screenshot` is registered and
-auth-gated (401, not 404/500). **Not deployed** — committed as v1.0.6,
-deploy-batching rule in effect.
+auth-gated (401, not 404/500). **Deployed and confirmed live** same session
+(user said "완료 되시면 커밋/푸쉬 하고, 배포 바로 진행해 주세요") — pushed to
+GitHub (`604a755..ea0c266`), deployed to Cloud Run revision
+`shoppingshots-00010-8vj`, live bundle verified to report v1.0.6.
+
+### 2026-08-0X — v1.0.7: benchmark-video reverse-engineering pipeline
+
+User pushed back hard on the source-clip-download decline (twice more, one
+reframing the clips as "판매자가 재사용하라고 올려둔 공식 소스") — held the
+position both times (see policy note in [[shoppingshots_rebuild_v1]] memory).
+User then proposed a genuinely different, better approach: instead of reusing
+any original footage, upload a benchmark short video + a real product photo,
+have Gemini reverse-engineer the benchmark's **camera movement / composition
+/ cut pacing only** (never its literal frames/branding), and have fal.ai
+recreate each cut from scratch with the user's actual product. Assessed this
+as legally sound (idea/technique extraction, not expression copying — the
+same category as standard competitive creative benchmarking) and designed +
+implemented it via Plan Mode (2 rounds — first the strategic assessment, then
+a detailed implementation plan the user explicitly requested with 3 required
+sections: Gemini guardrail prompt, output JSON schema, file-by-file plan).
+
+**New backend** (`server.ts`):
+- `express.json` limit raised 20mb → 150mb (video-as-base64 needs the
+  headroom; **Cloud Run's actual request-size ceiling has not been verified
+  live yet** — first real large-video upload will be the real test).
+- `uploadVideoToGeminiFiles()` — uploads a video Buffer via Gemini's Files
+  API (`ai.files.upload({file: new Blob(...)})`, Node 20 global `Blob`, no
+  temp file needed) and polls `ai.files.get()` until `state === 'ACTIVE'`
+  (same polling shape as `pollFalQueueResult` for fal.ai's queue).
+- `POST /api/analyze-benchmark-video` — the guardrail system prompt
+  (`BENCHMARK_ANALYSIS_GUARDRAIL`) explicitly forbids extracting brand
+  logos/characters/unique visual elements, restricts output to
+  camera-movement/composition/pacing technique descriptions, and forbids
+  naming the original product/brand. Returns a cut-by-cut array
+  (`fal_reference_prompt` = English background/lighting/composition prompt
+  with the product deliberately excluded since it's composited separately;
+  `fal_video_prompt` = motion prompt following the same
+  slowly/gently/naturally-only rules as `/api/generate-ai-video-prompt`).
+- `POST /api/generate-benchmark-reference-image` — thin wrapper reusing the
+  **existing** `processFalRembg` + `processFalFluxCompositing` helpers
+  (originally built for `/api/generate/video`'s I2V pipeline) with the
+  per-scene `fal_reference_prompt` instead of the generic studio-lighting
+  phrase. Almost no new fal.ai logic — just new orchestration.
+
+**New frontend**: `src/components/BenchmarkVideoAnalyzerView.tsx` (modal) —
+video + product-image upload, calls the analyze endpoint, shows an editable
+cut-by-cut breakdown, "적용" converts the response directly into `SceneItem[]`
+(reusing the existing scene model — no new scene type). Two new optional
+`SceneItem` fields added in `types.ts`: `fal_reference_prompt` and
+`product_reference_image_url` (the latter wasn't in the original plan text
+but turned out necessary — the analyzer's `handleApply` deliberately leaves
+`media_url` unset so these scenes get picked up by the existing bulk
+generator, which needed *something* to carry the product photo URL through
+to the reference-image step). `StoryboardTimelineView.tsx`'s empty-state now
+has a second button "🎯 벤치마킹 영상으로 AI 재창조" opening the modal, and its
+`handleGenerateAllScenes` (from the v1.0.6 bulk-generation work) now runs the
+reference-image compositing step first when a scene has
+`fal_reference_prompt` + `product_reference_image_url`, passing the result as
+`image_url` into `/api/generate/video`.
+
+Verified with `npx tsc --noEmit` (clean), local dev boot, and curl smoke
+tests confirming both new routes are registered and auth-gated (401).
+**Real video analysis accuracy, Gemini Files API behavior with a real large
+MP4, and Cloud Run's request-size ceiling are all still unverified** — first
+real test needed after deploy.
 
 ## Next session — pick up here
 
-1. **v1.0.6 has never been tested with real data** — the screenshot-vision
-   flow, bulk scene generation, and SEO metadata wiring are all type-checked
-   and boot-tested only. Needs a real user walkthrough before or right after
-   deploying.
-2. fal.ai is live (`FAL_KEY` deployed in v1.0.4) but the queue-polling fix
+1. **v1.0.7's benchmark-video pipeline is entirely untested with real data**
+   — this is the most complex thing built so far (Gemini Files API + video
+   understanding + a 2-stage fal.ai composite). Test with a real short MP4 +
+   real product photo before trusting it.
+2. **Cloud Run request-size limit is unverified** — if a real benchmark video
+   upload fails with a size/timeout error, the fix is likely either lowering
+   client-side expectations (ask user to trim/compress first) or moving to a
+   direct-to-Cloud-Storage upload flow instead of base64-through-Express.
+3. fal.ai is live (`FAL_KEY` deployed in v1.0.4) but the queue-polling fix
    has never been exercised against the real API — first real test should
-   happen via the bulk-generation button once deployed.
-3. If the video-download request comes up again, don't relitigate it from
-   scratch — see the v1.0.6 session log entry above for the reasoning already
-   given twice.
-4. Still no real end-to-end walkthrough of the deployed site as an actual
+   happen via the bulk-generation button.
+4. If the video-download request comes up again, don't relitigate it from
+   scratch — see the v1.0.6/v1.0.7 session log entries above and the policy
+   note in the `shoppingshots-rebuild-v1` memory file.
+5. Still no real end-to-end walkthrough of the deployed site as an actual
    user (sign up → product → script → storyboard → audio → render → real
    playable MP4) has been done end-to-end in one sitting.
 
