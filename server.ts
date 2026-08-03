@@ -1377,21 +1377,32 @@ app.post('/api/generate-benchmark-reference-image', async (req, res) => {
 // official YouTube Data API v3, which explicitly supports this discovery use case.
 app.post('/api/youtube/search-shorts', async (req, res) => {
   try {
-    const { query = '쇼핑 추천', publishedAfterDays = 14 } = req.body as { query?: string; publishedAfterDays?: number };
+    const {
+      query = '쇼핑 추천',
+      publishedAfterDays = 14,
+      sortBy = 'views'
+    } = req.body as { query?: string; publishedAfterDays?: number | null; sortBy?: 'date' | 'views' | 'velocity' };
     const apiKey = getUserYoutubeKey(req);
     if (!apiKey) {
       return res.status(503).json({ status: 'error', message: 'YouTube Data API 키가 설정되지 않았습니다. 설정 화면에서 키를 등록해 주세요.' });
     }
 
-    const publishedAfter = new Date(Date.now() - publishedAfterDays * 24 * 60 * 60 * 1000).toISOString();
     const searchUrl = new URL('https://www.googleapis.com/youtube/v3/search');
     searchUrl.searchParams.set('part', 'snippet');
     searchUrl.searchParams.set('q', `${query} shorts`);
     searchUrl.searchParams.set('type', 'video');
     searchUrl.searchParams.set('videoDuration', 'short');
-    searchUrl.searchParams.set('order', 'viewCount');
-    searchUrl.searchParams.set('publishedAfter', publishedAfter);
-    searchUrl.searchParams.set('maxResults', '15');
+    // YouTube's search API only sorts by one field at a time and has no "velocity" concept —
+    // for 'velocity' we still fetch the highest-view candidate pool (order=viewCount) since
+    // that's the pool most likely to contain high-momentum videos, then compute and re-sort
+    // by views-per-hour ourselves after fetching real stats below.
+    searchUrl.searchParams.set('order', sortBy === 'date' ? 'date' : 'viewCount');
+    // null/undefined publishedAfterDays means "전체 기간" (no time filter)
+    if (publishedAfterDays) {
+      const publishedAfter = new Date(Date.now() - publishedAfterDays * 24 * 60 * 60 * 1000).toISOString();
+      searchUrl.searchParams.set('publishedAfter', publishedAfter);
+    }
+    searchUrl.searchParams.set('maxResults', '25');
     searchUrl.searchParams.set('key', apiKey);
 
     const searchRes = await fetch(searchUrl.toString());
@@ -1419,19 +1430,36 @@ app.post('/api/youtube/search-shorts', async (req, res) => {
     }
     const detailsData = await detailsRes.json();
 
-    const results = (detailsData.items || [])
-      .map((v: any) => ({
-        videoId: v.id,
-        title: v.snippet?.title || '',
-        channelTitle: v.snippet?.channelTitle || '',
-        thumbnailUrl: v.snippet?.thumbnails?.high?.url || v.snippet?.thumbnails?.default?.url || '',
-        publishedAt: v.snippet?.publishedAt || '',
-        viewCount: parseInt(v.statistics?.viewCount || '0', 10),
-        durationSec: parseIso8601DurationToSeconds(v.contentDetails?.duration || ''),
-        videoUrl: `https://www.youtube.com/watch?v=${v.id}`
-      }))
-      .filter((v: any) => v.durationSec > 0 && v.durationSec <= 180)
-      .sort((a: any, b: any) => b.viewCount - a.viewCount);
+    const now = Date.now();
+    let results = (detailsData.items || [])
+      .map((v: any) => {
+        const viewCount = parseInt(v.statistics?.viewCount || '0', 10);
+        const publishedAt = v.snippet?.publishedAt || '';
+        const hoursSincePublished = publishedAt ? Math.max(1, (now - new Date(publishedAt).getTime()) / (1000 * 60 * 60)) : 1;
+        return {
+          videoId: v.id,
+          title: v.snippet?.title || '',
+          channelTitle: v.snippet?.channelTitle || '',
+          thumbnailUrl: v.snippet?.thumbnails?.high?.url || v.snippet?.thumbnails?.default?.url || '',
+          publishedAt,
+          viewCount,
+          // "화력" (heat/momentum): views accumulated per hour since upload — surfaces videos
+          // that blew up fast even if their raw view count is lower than an older video's.
+          velocity: Math.round(viewCount / hoursSincePublished),
+          durationSec: parseIso8601DurationToSeconds(v.contentDetails?.duration || ''),
+          videoUrl: `https://www.youtube.com/watch?v=${v.id}`
+        };
+      })
+      // Strict Shorts filter — 1분 이하만 노출
+      .filter((v: any) => v.durationSec > 0 && v.durationSec <= 60);
+
+    if (sortBy === 'date') {
+      results.sort((a: any, b: any) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+    } else if (sortBy === 'velocity') {
+      results.sort((a: any, b: any) => b.velocity - a.velocity);
+    } else {
+      results.sort((a: any, b: any) => b.viewCount - a.viewCount);
+    }
 
     res.json({ status: 'success', data: results });
   } catch (err: any) {
@@ -2073,14 +2101,35 @@ app.post('/api/trends/analyze', async (req, res) => {
 
 // Auto-run on page load with no input — surfaces currently trending shopping categories/
 // products via real Google Search grounding, so the trend page isn't a blank form on first visit.
+// Category filter for the "지금 가장 핫한 카테고리" panel — maps UI tab labels to
+// search-steering hints so Gemini's grounded search stays inside real shopping-ranking
+// sources for that category instead of drifting into general news.
+const SHOPPING_HOT_CATEGORY_HINTS: Record<string, string> = {
+  '전체': '',
+  '생활/주방': '(주방용품, 생활용품, 청소/수납 카테고리에 한정)',
+  '디지털/가전': '(디지털기기, 소형가전, IT 액세서리 카테고리에 한정)',
+  '패션': '(의류, 신발, 가방, 패션잡화 카테고리에 한정)',
+  '뷰티/스포츠': '(화장품, 스킨케어, 운동/스포츠용품 카테고리에 한정)'
+};
+
 app.post('/api/trends/auto-recommend', async (req, res) => {
   try {
+    const { category = '전체' } = req.body as { category?: string };
     const ai = getGeminiClient(getUserGeminiKey(req));
+    const categoryHint = SHOPPING_HOT_CATEGORY_HINTS[category] ?? '';
 
     const prompt = `
 오늘은 ${TODAY_KST()}입니다 (대한민국 기준).
 
-실제 Google 검색을 사용하여, 지금 이 시점 기준 대한민국에서 화제가 되고 있거나 계절적으로 수요가 급증하는 "쇼핑 쇼츠(제휴마케팅 숏폼 영상)" 소재가 될 만한 카테고리와 구체적인 상품 아이디어를 조사하세요. 계절/시즌 이슈(예: 현재 계절의 날씨, 휴가철, 명절 등), 최근 뉴스/블로그/커뮤니티에서 실제로 언급되는 인기 상품을 반영해야 합니다. 검색으로 확인되지 않는 내용은 절대 지어내지 마세요.
+실제 Google 검색을 사용하여, 지금 이 시점 기준 대한민국 "쇼핑 랭킹/베스트 페이지"에서 실제로 인기 상승 중인 상품·카테고리를 조사하세요${categoryHint}.
+
+**검색 대상을 다음 소스로 한정하세요 (뉴스/기사/블로그 포스팅은 절대 사용하지 마세요)**:
+- 네이버쇼핑 베스트100 / 랭킹 페이지
+- 쿠팡 베스트/로켓배송 랭킹
+- 다나와 인기상품 랭킹
+- (패션이면) 에이블리/무신사 랭킹, (뷰티면) 올리브영 랭킹
+
+일반 뉴스 기사나 트렌드 해설 기사는 쇼핑쇼츠 소재로 쓸모가 없으니 검색 결과에서 배제하고, 반드시 실제 쇼핑몰의 판매 랭킹/베스트 페이지에서 확인된 상품명과 카테고리만 사용하세요. 계절/시즌 수요(현재 계절, 휴가철, 명절 등)도 함께 고려하되, 근거는 항상 쇼핑 랭킹 페이지에서 나와야 합니다. 검색으로 확인되지 않는 내용은 절대 지어내지 마세요.
 
 5개를 찾아서, 다른 설명 없이 아래 JSON 배열 형식으로만 응답하세요:
 [

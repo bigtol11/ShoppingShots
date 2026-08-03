@@ -639,9 +639,58 @@ untested** — needs a real Anthropic key from the user to confirm the
 tool-use JSON extraction actually works end-to-end, not just that it
 compiles.
 
+### v1.1.1 — Trend/YouTube panel overhaul: shopping-ranking sources, category tabs, cross-panel search, period/sort/velocity
+
+User asked to fully optimize Tab 1 for shopping-shorts sourcing. Key
+feasibility note surfaced to the user in chat (documenting here so it's not
+re-litigated): **there is no public Google Trends API and no public
+Coupang "trending keywords" API** — neither exists as a legitimate
+integratable endpoint. Substituted a buildable equivalent: tightened the
+existing Gemini search-grounding prompt to explicitly target real shopping
+ranking pages (네이버쇼핑 베스트, 쿠팡 랭킹, 다나와 인기상품, 에이블리/무신사/올리브영
+for fashion/beauty) and explicitly exclude news/blog articles, which was the
+user's actual complaint ("일반 검색은 뉴스 기사만 나온다"). Naver DataLab Shopping
+Insight *does* have an official API but only returns relative-interest
+trends for keywords/categories you already supply — it can't "discover" new
+hot keywords on its own, so it wasn't a good fit for this "surprise me" panel
+and wasn't built; worth reconsidering if the user specifically wants
+search-volume charts for keywords they already have in mind.
+
+- **`server.ts`**: `SHOPPING_HOT_CATEGORY_HINTS` + `category` param on
+  `/api/trends/auto-recommend`, rewrote the prompt to hard-restrict sources
+  to shopping rankings. `/api/youtube/search-shorts` gained `sortBy: 'date'
+  | 'views' | 'velocity'` (velocity = viewCount / hoursSincePublished,
+  "화력순" — surfaces fast-blowing-up recent Shorts even with a lower raw
+  view count than an older video) and `publishedAfterDays: number | null`
+  (`null` = 전체 기간, no filter). **Duration filter tightened from ≤180s to
+  ≤60s** per explicit user spec ("무조건 1분 이하") — note this is stricter
+  than YouTube's actual current Shorts definition (≤3min) since the user
+  wants punchy source material specifically.
+- **`TrendBenchmarkingView.tsx`**: category tabs (전체/생활주방/디지털가전/패션/뷰티스포츠)
+  above the left panel, re-fetching automatically on tab change if a search
+  was already run. Each hot-keyword card gained a "📺 유튜브 검색" button that
+  fills the right panel's query and fires the search immediately — passes
+  the keyword directly as a function argument rather than through state,
+  since `setYtQuery` + an immediate `handleSearchYoutube()` in the same
+  handler would read the pre-update (stale) query value. New 기간/정렬 `<select>`
+  dropdowns on the YouTube panel; results show a 🔥 velocity figure when
+  sorted by 화력순. Also fixed two latent bugs the refactor would have
+  otherwise introduced: two `onClick={fetchAutoRecommend}` handlers were
+  passing the click event itself as the (now-existing) `categoryOverride`
+  parameter — changed to `onClick={() => fetchAutoRecommend()}`.
+
+Verified with `npx tsc --noEmit` (clean), local dev boot, curl smoke tests
+confirming both touched endpoints are still 401-gated. **Not yet tested with
+real API keys** — the shopping-ranking-scoped Gemini prompt and the velocity
+sort math are both unverified against real data.
+
 ## Next session — pick up here
 
-1. **v1.1.0's Claude integration has never made a real API call** — the
+1. **v1.1.1's shopping-ranking search scoping and velocity sort are
+   untested with real data** — verify the auto-recommend results actually
+   come from shopping rankings (not news) and that 화력순 surfaces genuinely
+   fast-growing videos, not just recent ones.
+2. **v1.1.0's Claude integration has never made a real API call** — the
    forced tool-use JSON extraction pattern is standard but unverified
    against the actual Anthropic API in this codebase. Test with a real key
    across at least Fable 5 and one other model before trusting it.

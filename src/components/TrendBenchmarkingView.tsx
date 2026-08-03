@@ -20,9 +20,25 @@ interface YoutubeShortResult {
   thumbnailUrl: string;
   publishedAt: string;
   viewCount: number;
+  velocity: number;
   durationSec: number;
   videoUrl: string;
 }
+
+const HOT_CATEGORY_TABS = ['전체', '생활/주방', '디지털/가전', '패션', '뷰티/스포츠'];
+
+const YT_PERIOD_OPTIONS: { id: number | null; label: string }[] = [
+  { id: 7, label: '최근 1주' },
+  { id: 30, label: '최근 1개월' },
+  { id: 90, label: '최근 3개월' },
+  { id: null, label: '전체 기간' }
+];
+
+const YT_SORT_OPTIONS: { id: 'date' | 'views' | 'velocity'; label: string }[] = [
+  { id: 'date', label: '최신순' },
+  { id: 'views', label: '누적 조회수순' },
+  { id: 'velocity', label: '🔥 화력순' }
+];
 
 const formatDaysAgo = (isoDate: string): string => {
   const days = Math.floor((Date.now() - new Date(isoDate).getTime()) / (1000 * 60 * 60 * 24));
@@ -58,16 +74,18 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
   const [keyword, setKeyword] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
 
-  // Auto-recommended trends — real Google Search grounding, but ONLY runs when the
-  // user explicitly clicks the button below. Auto-firing on every page load / app
-  // open was burning search-grounded Gemini calls the user never asked for.
+  // Auto-recommended trends — real Google Search grounding scoped to actual shopping-ranking
+  // pages (Naver Shopping Best, Coupang rankings, Danawa popular items), NOT general news —
+  // ONLY runs when the user explicitly clicks the button below. Auto-firing on every page
+  // load / app open was burning search-grounded Gemini calls the user never asked for.
   const [autoTrends, setAutoTrends] = useState<TrendTopic[]>([]);
   const [isAutoLoading, setIsAutoLoading] = useState<boolean>(false);
   const [autoError, setAutoError] = useState<string | null>(null);
   const [autoGroundedAt, setAutoGroundedAt] = useState<string | null>(null);
   const [hasRunAuto, setHasRunAuto] = useState<boolean>(false);
+  const [hotCategory, setHotCategory] = useState<string>('전체');
 
-  const fetchAutoRecommend = async () => {
+  const fetchAutoRecommend = async (categoryOverride?: string) => {
     setIsAutoLoading(true);
     setAutoError(null);
     setHasRunAuto(true);
@@ -75,7 +93,7 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
       const res = await apiFetch('/api/trends/auto-recommend', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        body: JSON.stringify({ category: categoryOverride ?? hotCategory })
       });
       const json = await res.json();
       if (json.status === 'success' && Array.isArray(json.data)) {
@@ -91,6 +109,11 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
     }
   };
 
+  const handleSelectHotCategory = (cat: string) => {
+    setHotCategory(cat);
+    if (hasRunAuto) fetchAutoRecommend(cat);
+  };
+
   // YouTube benchmarking search — official YouTube Data API, discovery only (no download
   // built into the app; downloading videos violates YouTube's ToS regardless of downstream
   // use, so the user acquires the file themselves and uploads it to the benchmark-video
@@ -100,8 +123,13 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
   const [isYtLoading, setIsYtLoading] = useState(false);
   const [ytError, setYtError] = useState<string | null>(null);
   const [hasRunYtSearch, setHasRunYtSearch] = useState(false);
+  const [ytPeriodDays, setYtPeriodDays] = useState<number | null>(30);
+  const [ytSortBy, setYtSortBy] = useState<'date' | 'views' | 'velocity'>('views');
 
-  const handleSearchYoutube = async () => {
+  // Accepts an override query so the left panel's "이 키워드로 유튜브 검색" click can search
+  // immediately without waiting on React state to settle (setYtQuery + this call in the same
+  // handler would otherwise read the stale ytQuery value on this first render pass).
+  const handleSearchYoutube = async (queryOverride?: string) => {
     setIsYtLoading(true);
     setYtError(null);
     setHasRunYtSearch(true);
@@ -109,7 +137,11 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
       const res = await apiFetch('/api/youtube/search-shorts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: ytQuery || category || '쇼핑 추천', publishedAfterDays: 14 })
+        body: JSON.stringify({
+          query: queryOverride ?? (ytQuery || category || '쇼핑 추천'),
+          publishedAfterDays: ytPeriodDays,
+          sortBy: ytSortBy
+        })
       });
       const json = await res.json();
       if (json.status === 'success' && Array.isArray(json.data)) {
@@ -122,6 +154,11 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
     } finally {
       setIsYtLoading(false);
     }
+  };
+
+  const handleSearchFromHotKeyword = (keyword: string) => {
+    setYtQuery(keyword);
+    handleSearchYoutube(keyword);
   };
 
   const categoryDropdownRef = useRef<HTMLDivElement>(null);
@@ -197,13 +234,13 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
             </span>
-            <h3 className="text-sm font-bold text-white">🔥 지금 가장 핫한 카테고리 (실시간 Google 검색 기반)</h3>
+            <h3 className="text-sm font-bold text-white">🔥 지금 가장 핫한 카테고리 (쇼핑 랭킹 기반)</h3>
           </div>
           {hasRunAuto && (
             <div className="flex items-center space-x-2 text-[11px] text-slate-400">
               {autoGroundedAt && <span>기준: {autoGroundedAt}</span>}
               <button
-                onClick={fetchAutoRecommend}
+                onClick={() => fetchAutoRecommend()}
                 disabled={isAutoLoading}
                 className="bg-[#211b3d] hover:bg-[#2b244d] text-emerald-300 border border-emerald-800/50 px-2.5 py-1 rounded-lg font-medium transition disabled:opacity-50"
               >
@@ -213,6 +250,23 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
           )}
         </div>
 
+        {/* Category Tabs */}
+        <div className="flex flex-wrap gap-1.5">
+          {HOT_CATEGORY_TABS.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => handleSelectHotCategory(cat)}
+              className={`text-[11px] font-bold px-2.5 py-1 rounded-full border transition ${
+                hotCategory === cat
+                  ? 'bg-emerald-600 border-emerald-400 text-white'
+                  : 'bg-[#120f23] border-[#262045] text-slate-400 hover:border-emerald-800'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+
         {!hasRunAuto ? (
           <div className="flex flex-col items-center justify-center py-8 space-y-3 text-center">
             <p className="text-xs text-slate-400 max-w-md">
@@ -220,7 +274,7 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
               바로 시작하고 싶지 않다면 아래에서 카테고리/키워드를 직접 선택해 진행하세요.
             </p>
             <button
-              onClick={fetchAutoRecommend}
+              onClick={() => fetchAutoRecommend()}
               className="bg-emerald-700/80 hover:bg-emerald-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all flex items-center space-x-2 shadow-md"
             >
               <Flame className="w-4 h-4 text-amber-300 fill-amber-300" />
@@ -259,13 +313,22 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
                     <ExternalLink className="w-2.5 h-2.5" />
                   </a>
                 )}
-                <button
-                  onClick={() => onSelectTopic(t.title, t.recommended_keywords)}
-                  className="w-full bg-emerald-700/80 hover:bg-emerald-600 text-white font-bold text-[11px] py-2 rounded-lg transition-all flex items-center justify-center space-x-1"
-                >
-                  <span>이 주제로 시작</span>
-                  <ArrowRight className="w-3 h-3" />
-                </button>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    onClick={() => handleSearchFromHotKeyword(t.title)}
+                    className="bg-rose-800/60 hover:bg-rose-700 text-rose-100 font-bold text-[11px] py-2 rounded-lg transition-all flex items-center justify-center space-x-1"
+                    title="오른쪽 유튜브 벤치마킹 검색창에 이 키워드로 바로 검색"
+                  >
+                    <span>📺 유튜브 검색</span>
+                  </button>
+                  <button
+                    onClick={() => onSelectTopic(t.title, t.recommended_keywords)}
+                    className="bg-emerald-700/80 hover:bg-emerald-600 text-white font-bold text-[11px] py-2 rounded-lg transition-all flex items-center justify-center space-x-1"
+                  >
+                    <span>이 주제로 시작</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -290,7 +353,7 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
             className="flex-1 bg-[#110e20] border border-[#342d59] rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"
           />
           <button
-            onClick={handleSearchYoutube}
+            onClick={() => handleSearchYoutube()}
             disabled={isYtLoading}
             className="bg-rose-700/80 hover:bg-rose-600 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all flex items-center space-x-1.5 shrink-0 disabled:opacity-50"
           >
@@ -299,11 +362,39 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
           </button>
         </div>
 
+        {/* Period & Sort Selectors */}
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[10px] text-slate-400 block mb-1">기간</label>
+            <select
+              value={ytPeriodDays === null ? 'all' : ytPeriodDays}
+              onChange={(e) => setYtPeriodDays(e.target.value === 'all' ? null : Number(e.target.value))}
+              className="w-full bg-[#110e20] border border-[#342d59] rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-rose-500"
+            >
+              {YT_PERIOD_OPTIONS.map((opt) => (
+                <option key={opt.label} value={opt.id === null ? 'all' : opt.id}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-slate-400 block mb-1">정렬 기준</label>
+            <select
+              value={ytSortBy}
+              onChange={(e) => setYtSortBy(e.target.value as 'date' | 'views' | 'velocity')}
+              className="w-full bg-[#110e20] border border-[#342d59] rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-rose-500"
+            >
+              {YT_SORT_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         {!hasRunYtSearch ? (
           <p className="text-xs text-slate-400 text-center py-6">
-            최근 2주 내 업로드된 쇼핑 숏폼 중 조회수 높은 순으로 보여드립니다.
-            다운로드는 지원하지 않습니다 — 유튜브 이용약관상 앱에서 대신 받아드릴 수 없어요.
-            영상을 직접 확보하신 뒤 스토리보드 단계의 "벤치마킹 영상으로 AI 재창조"에 업로드하세요.
+            1분 이하 쇼핑 숏폼만 필터링해서 보여드립니다. 다운로드는 지원하지 않습니다 —
+            유튜브 이용약관상 앱에서 대신 받아드릴 수 없어요. 영상을 직접 확보하신 뒤
+            스토리보드 단계의 "벤치마킹 영상으로 AI 재창조"에 업로드하세요.
           </p>
         ) : isYtLoading ? (
           <div className="flex items-center justify-center py-8 space-x-2 text-slate-400 text-xs">
@@ -333,6 +424,9 @@ export const TrendBenchmarkingView: React.FC<TrendBenchmarkingViewProps> = ({ on
                   <div className="flex items-center space-x-2 text-[10px] text-slate-500">
                     <span className="flex items-center space-x-0.5"><Eye className="w-3 h-3" /><span>{formatViewCount(v.viewCount)}회</span></span>
                     <span className="flex items-center space-x-0.5"><Clock className="w-3 h-3" /><span>{formatDaysAgo(v.publishedAt)}</span></span>
+                    {ytSortBy === 'velocity' && (
+                      <span className="flex items-center space-x-0.5 text-amber-400 font-bold">🔥{formatViewCount(v.velocity)}/시간</span>
+                    )}
                   </div>
                 </div>
                 <ExternalLink className="w-3.5 h-3.5 text-slate-500 shrink-0" />
