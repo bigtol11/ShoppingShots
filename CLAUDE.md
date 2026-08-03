@@ -719,48 +719,60 @@ and asking the rest to read as a coherent video-production pipeline.
   "다음 단계: 7./8./9." button labels referencing the same stale numbering.
 
 Verified with `npx tsc --noEmit` (clean), local dev boot, confirmed no
-remaining `Sidebar` references anywhere in `src/`.
+remaining `Sidebar` references anywhere in `src/`. **Deployed**, then user
+sent a screenshot showing the bar left-aligned with small/low-contrast
+text instead of centered — fixed same session as v1.1.3 below.
+
+### v1.1.3 — StepNav centering, text size/contrast, scrollbar polish
+
+User sent a screenshot showing the new StepNav bar left-aligned with small
+text. Fixed: `justify-center` on the row (was defaulting to flex-start via
+`min-w-max` + no centering), bumped label text `text-xs`→`text-sm` and icon
+size `w-3.5`→`w-4`, raised inactive-tab text contrast (`text-slate-400`→
+`text-slate-300`, hover→`text-white`). Added an actual `.no-scrollbar` CSS
+utility to `index.css` (was referenced but never defined — harmless no-op
+before, now hides the scrollbar on the horizontally-scrollable row for a
+cleaner look while narrow phones can still swipe-scroll it).
+
+Verified with `npx tsc --noEmit` (clean), local dev boot.
 
 ## Next session — pick up here
 
-1. **v1.1.2's new layout has not been visually checked in a real browser**
-   — only type-checked and boot-tested. Confirm the horizontal step bar
-   actually scrolls cleanly on a real narrow phone width and that nothing
-   overlaps with the sticky header.
+1. **v1.1.3 has not been visually confirmed on a real device** — only
+   type-checked/boot-tested; the user is testing live right after this
+   deploy, so their next message is the real signal.
 2. **v1.1.1's shopping-ranking search scoping and velocity sort are
    untested with real data** — verify the auto-recommend results actually
    come from shopping rankings (not news) and that 화력순 surfaces genuinely
    fast-growing videos, not just recent ones.
-2. **v1.1.0's Claude integration has never made a real API call** — the
+3. **v1.1.0's Claude integration has never made a real API call** — the
    forced tool-use JSON extraction pattern is standard but unverified
    against the actual Anthropic API in this codebase. Test with a real key
    across at least Fable 5 and one other model before trusting it.
-2. **User is about to test v1.0.9 live** — the fal.ai BYOK conversion, real
-   ElevenLabs TTS, and the key-save session-expiry fix have never been
-   exercised against real APIs/real user sessions. Their test results are
-   the next input — don't assume anything worked until they report back.
-2. **v1.0.7's benchmark-video pipeline is entirely untested with real data**
+4. **fal.ai BYOK, real ElevenLabs TTS, and the key-save session-expiry fix
+   (v1.0.9) have never been exercised against real APIs/real user sessions.**
+5. **v1.0.7's benchmark-video pipeline is entirely untested with real data**
    — this is the most complex thing built so far (Gemini Files API + video
    understanding + a 2-stage fal.ai composite). Test with a real short MP4 +
    real product photo before trusting it.
-3. **Cloud Run request-size limit is unverified** — if a real benchmark video
+6. **Cloud Run request-size limit is unverified** — if a real benchmark video
    upload fails with a size/timeout error, the fix is likely either lowering
    client-side expectations (ask user to trim/compress first) or moving to a
    direct-to-Cloud-Storage upload flow instead of base64-through-Express.
-4. **v1.0.8 needs a real YouTube Data API key to test** — user doesn't have
-   one registered yet as of this entry.
-5. fal.ai queue-polling fix (from an earlier session) still hasn't been
+7. **v1.0.8/v1.1.1's YouTube search needs a real YouTube Data API key to
+   test** — user doesn't have one registered yet as of this entry.
+8. fal.ai queue-polling fix (from an earlier session) still hasn't been
    exercised against the real API with a user-provided key — first real
    test should happen via the bulk-generation button now that fal.ai is BYOK.
-6. If a video-*download* request comes up again (from any platform), don't
+9. If a video-*download* request comes up again (from any platform), don't
    relitigate it from scratch — see the v1.0.6/v1.0.7/v1.0.8 session log
    entries above and the policy note in the `shoppingshots-rebuild-v1` memory
    file. This has now been declined three separate times across two
    different framings (direct reuse, and "just for reverse-engineering
    input") — the ToS reasoning is independent of downstream use.
-7. Still no real end-to-end walkthrough of the deployed site as an actual
-   user (sign up → product → script → storyboard → audio → render → real
-   playable MP4) has been done end-to-end in one sitting.
+10. Still no real end-to-end walkthrough of the deployed site as an actual
+    user (sign up → product → script → storyboard → audio → render → real
+    playable MP4) has been done end-to-end in one sitting.
 
 Lower-priority, not blocking:
 - Local `npm run dev` still can't render (no ffmpeg on this dev machine) —

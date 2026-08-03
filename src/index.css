@@ -4,3 +4,14 @@
   /* Extra-small breakpoint for hiding non-essential header text on very narrow phones */
   --breakpoint-xs: 26rem;
 }
+
+/* Hides the scrollbar on horizontally-scrollable rows (e.g. StepNav) while keeping
+   the element scrollable — the scroll affordance itself (content peeking off-edge)
+   is enough of a hint without a visible scrollbar cluttering a compact nav bar. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
